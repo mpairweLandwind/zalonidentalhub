@@ -1,0 +1,37 @@
+{
+  "flutter": {
+    "platforms": {
+      "android": {
+        "default": {
+          "projectId": "zalonidentalhub",
+          "appId": "1:989018014187:android:0af10bf2aacc9f41e999ae",
+          "fileOutput": "android/app/google-services.json"
+        }
+      },
+      "dart": {
+        "lib/firebase_options.dart": {
+          "projectId": "zalonidentalhub",
+          "configurations": {
+            "android": "1:989018014187:android:0af10bf2aacc9f41e999ae",
+            "ios": "1:989018014187:ios:958785b9e0793869e999ae",
+            "macos": "1:989018014187:ios:958785b9e0793869e999ae",
+            "web": "1:989018014187:web:1cd08cf40f2d65b6e999ae",
+            "windows": "1:989018014187:web:b0659a771f2b6022e999ae"
+          }
+        }
+      }
+    }
+  },
+  "emulators": {
+    "dataconnect": {
+      "dataDir": "dataconnect/.dataconnect/pgliteData"
+    }
+  },
+  "dataconnect": {
+    "source": "dataconnect"
+  },
+  "firestore": {
+    "rules": "firestore.rules",
+    "indexes": "firestore.indexes.json"
+  }
+}

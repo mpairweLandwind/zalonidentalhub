@@ -1,0 +1,20 @@
+{
+  "buildFiles": [
+    "/home/darkhorse/flutter/packages/flutter_tools/gradle/src/main/groovy/CMakeLists.txt"
+  ],
+  "cleanCommandsComponents": [
+    [
+      "/home/darkhorse/Android/Sdk/cmake/3.22.1/bin/ninja",
+      "-C",
+      "/home/darkhorse/Flutter_Projects/zalonidentalhub/android/app/.cxx/Debug/6ro4o2g4/x86_64",
+      "clean"
+    ]
+  ],
+  "buildTargetsCommandComponents": [
+    "/home/darkhorse/Android/Sdk/cmake/3.22.1/bin/ninja",
+    "-C",
+    "/home/darkhorse/Flutter_Projects/zalonidentalhub/android/app/.cxx/Debug/6ro4o2g4/x86_64",
+    "{LIST_OF_TARGETS_TO_BUILD}"
+  ],
+  "libraries": {}
+}
