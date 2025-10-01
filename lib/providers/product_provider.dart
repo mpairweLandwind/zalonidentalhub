@@ -2,6 +2,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'dart:async';
 import '../models/product.dart';
 
 // Define the state class
@@ -62,6 +63,39 @@ class ProductNotifier extends Notifier<ProductState> {
   @override
   ProductState build() => ProductState();
 
+  // Initialize all data with optimized loading
+  Future<void> initializeAllData() async {
+    state = state.copyWith(isLoading: true);
+
+    try {
+      // Fetch data in parallel for better performance
+      await Future.wait([
+        fetchCategory(),
+        fetchPromotion(),
+        fetchSpecialCategories(),
+      ]);
+
+      // Use category data to populate allProducts for carousel
+      final allProducts = <Product>[];
+      for (final categoryData in state.category.values) {
+        final products = categoryData['products'] as List<Product>;
+        allProducts.addAll(products.take(2)); // Limit products per category
+      }
+
+      state = state.copyWith(
+        allProducts: allProducts.take(8).toList(), // Limit carousel items
+        isLoading: false,
+      );
+
+      // Precache carousel images after data loading
+      if (allProducts.isNotEmpty) {
+        await precacheCarouselImages(allProducts);
+      }
+    } catch (error) {
+      state = state.copyWith(isLoading: false);
+    }
+  }
+
   void setSelectedCategory(String? category) {
     state = state.copyWith(selectedCategory: category);
     fetchProducts(category);
@@ -105,28 +139,66 @@ class ProductNotifier extends Notifier<ProductState> {
     }
   }
 
-// Add this method to precache images
+// Add this method to precache images with better memory management
   Future<void> precacheCarouselImages(List<Product> products) async {
-    // Clear previous precached images
+    // Clear previous precached images to prevent memory leaks
     for (final image in _precachedImages) {
       image.evict();
     }
     _precachedImages.clear();
 
+    // Limit to 8 images for optimal memory usage
     final imagesToPrecache = products
-        .take(5) // Limit to 5 images for memory efficiency
+        .take(8)
+        .where((product) => product.imageUrl.isNotEmpty)
         .map((product) => CachedNetworkImageProvider(product.imageUrl))
         .toList();
 
+    // Precache images with error handling
     for (final imageProvider in imagesToPrecache) {
       try {
-        final image = imageProvider.resolve(ImageConfiguration.empty);
         if (!_precachedImages.contains(imageProvider)) {
           _precachedImages.add(imageProvider);
-          image.addListener(ImageStreamListener((_, __) {}));
+
+          // Precache with limited memory usage
+          final imageStream = imageProvider.resolve(
+            const ImageConfiguration(
+              size: Size(400, 300), // Limit resolution for memory efficiency
+            ),
+          );
+
+          // Add listener for preloading
+          final completer = Completer<void>();
+          late ImageStreamListener listener;
+
+          listener = ImageStreamListener(
+            (ImageInfo info, bool synchronousCall) {
+              if (!completer.isCompleted) {
+                completer.complete();
+              }
+              imageStream.removeListener(listener);
+            },
+            onError: (dynamic exception, StackTrace? stackTrace) {
+              if (!completer.isCompleted) {
+                completer.complete();
+              }
+              imageStream.removeListener(listener);
+            },
+          );
+
+          imageStream.addListener(listener);
+
+          // Wait for image to load with timeout
+          await completer.future.timeout(
+            const Duration(seconds: 5),
+            onTimeout: () {
+              imageStream.removeListener(listener);
+            },
+          );
         }
       } catch (e) {
-        // Handle image loading errors silently
+        // Silently handle preloading errors
+        continue;
       }
     }
   }

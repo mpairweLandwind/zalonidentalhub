@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:zalonidentalhub/login_page.dart';
 import 'package:zalonidentalhub/main_screen.dart';
 import 'package:zalonidentalhub/models/cart_model.dart';
@@ -12,13 +13,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await Firebase.initializeApp(
-    options: DefaultFirebaseOptions.currentPlatform,
-  );
+  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
 
-  runApp(
-    const ProviderScope(child: MyApp()),
-  );
+  // Configure edge-to-edge for Android 15+
+  SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+
+  runApp(const ProviderScope(child: MyApp()));
 }
 
 class MyApp extends StatelessWidget {
@@ -32,17 +32,15 @@ class MyApp extends StatelessWidget {
         '/registerScreen': (context) => const RegisterScreen(),
         '/Dashboard': (context) => const MainScreen(),
         '/CartScreen': (context) => CartScreen(
-              cartItems: const [],
-              cartTotal: 0,
-              cart: Cart(),
-              user: null,
-            ),
+          cartItems: const [],
+          cartTotal: 0,
+          cart: Cart(),
+          user: null,
+        ),
         '/accountScreen': (context) => const AccountScreen(),
       },
       title: 'Zaloni Dental Hub',
-      theme: ThemeData(
-        primarySwatch: Colors.blue,
-      ),
+      theme: ThemeData(primarySwatch: Colors.blue),
       home: const SplashScreen(),
     );
   }
@@ -96,10 +94,7 @@ class _SplashScreenState extends ConsumerState<SplashScreen> {
             gradient: LinearGradient(
               begin: Alignment.topCenter,
               end: Alignment.bottomCenter,
-              colors: [
-                Colors.lightBlue.shade300,
-                Colors.blueAccent.shade700,
-              ],
+              colors: [Colors.lightBlue.shade300, Colors.blueAccent.shade700],
             ),
           ),
           child: Column(
@@ -128,10 +123,7 @@ class _SplashScreenState extends ConsumerState<SplashScreen> {
               const Text(
                 'Complete dental care at your fingertips.',
                 textAlign: TextAlign.center,
-                style: TextStyle(
-                  fontSize: 18.0,
-                  color: Colors.white70,
-                ),
+                style: TextStyle(fontSize: 18.0, color: Colors.white70),
               ),
               const Spacer(),
               const Spacer(),
@@ -153,10 +145,7 @@ class _SplashScreenState extends ConsumerState<SplashScreen> {
                 ),
                 child: const Text(
                   'Get Started',
-                  style: TextStyle(
-                    fontSize: 20.0,
-                    fontWeight: FontWeight.bold,
-                  ),
+                  style: TextStyle(fontSize: 20.0, fontWeight: FontWeight.bold),
                 ),
               ),
               const SizedBox(height: 24.0),
