@@ -8,6 +8,7 @@ import 'package:zalonidentalhub/register_page.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:zalonidentalhub/screens/account_screen.dart';
 import 'package:zalonidentalhub/screens/cart_screen.dart';
+import 'package:zalonidentalhub/theme/app_theme.dart';
 import 'firebase_options.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -40,7 +41,7 @@ class MyApp extends StatelessWidget {
         '/accountScreen': (context) => const AccountScreen(),
       },
       title: 'Zaloni Dental Hub',
-      theme: ThemeData(primarySwatch: Colors.blue),
+      theme: AppTheme.lightTheme(),
       home: const SplashScreen(),
     );
   }
@@ -85,6 +86,7 @@ class _SplashScreenState extends ConsumerState<SplashScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
     return Scaffold(
       body: SafeArea(
         child: Container(
@@ -94,7 +96,7 @@ class _SplashScreenState extends ConsumerState<SplashScreen> {
             gradient: LinearGradient(
               begin: Alignment.topCenter,
               end: Alignment.bottomCenter,
-              colors: [Colors.lightBlue.shade300, Colors.blueAccent.shade700],
+              colors: [colorScheme.primaryContainer, colorScheme.primary],
             ),
           ),
           child: Column(
@@ -129,15 +131,14 @@ class _SplashScreenState extends ConsumerState<SplashScreen> {
               const Spacer(),
               ElevatedButton(
                 onPressed: () {
-                  // Navigate to the MainScreen (Dashboard)
                   Navigator.pushReplacement(
                     context,
                     MaterialPageRoute(builder: (context) => const MainScreen()),
                   );
                 },
                 style: ElevatedButton.styleFrom(
-                  foregroundColor: Colors.blueAccent.shade700,
-                  backgroundColor: Colors.white,
+                  foregroundColor: colorScheme.primary,
+                  backgroundColor: colorScheme.onPrimary,
                   padding: const EdgeInsets.symmetric(vertical: 12.0),
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(30.0),

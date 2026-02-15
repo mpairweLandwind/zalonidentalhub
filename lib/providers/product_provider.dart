@@ -14,10 +14,12 @@ class ProductState {
   final List<Product> latestProducts;
   final List<Product> recommendedProducts;
   final List<Product> mostPopularProducts;
-  final Map<String, Map<String, dynamic>>
-      category; // Updated to store category data
+  final Map<String, Map<String, dynamic>> category;
   final bool isLoading;
-  // Removed _precachedImages from ProductState
+  final String? errorMessage;
+  final bool hasError;
+  final bool isInitialized;
+
   ProductState({
     this.selectedCategory,
     this.products = const [],
@@ -28,6 +30,9 @@ class ProductState {
     this.mostPopularProducts = const [],
     this.category = const {},
     this.isLoading = false,
+    this.errorMessage,
+    this.hasError = false,
+    this.isInitialized = false,
   });
 
   ProductState copyWith({
@@ -40,6 +45,9 @@ class ProductState {
     List<Product>? mostPopularProducts,
     Map<String, Map<String, dynamic>>? category,
     bool? isLoading,
+    String? errorMessage,
+    bool? hasError,
+    bool? isInitialized,
   }) {
     return ProductState(
       selectedCategory: selectedCategory ?? this.selectedCategory,
@@ -51,21 +59,49 @@ class ProductState {
       mostPopularProducts: mostPopularProducts ?? this.mostPopularProducts,
       category: category ?? this.category,
       isLoading: isLoading ?? this.isLoading,
+      errorMessage: errorMessage ?? this.errorMessage,
+      hasError: hasError ?? this.hasError,
+      isInitialized: isInitialized ?? this.isInitialized,
     );
   }
 }
 
 // Define the notifier class
 class ProductNotifier extends Notifier<ProductState> {
-  final List<ImageProvider> _precachedImages =
-      []; // Moved _precachedImages here
+  final List<ImageProvider> _precachedImages = [];
 
   @override
   ProductState build() => ProductState();
 
+  /// Shared helper to construct a Product from a Firestore document map.
+  Product _productFromDoc(Map<String, dynamic> data) {
+    return Product(
+      category: data['category'] ?? '',
+      subcategory: data['subcategory'] ?? '',
+      name: data['name'] ?? '',
+      quantity: data['quantity'] ?? 0,
+      imageUrl: (data['imageUrls'] as List<dynamic>?)?.first ?? '',
+      salePrice: (data['salePrice'] as num?)?.toDouble() ?? 0.0,
+      discountPrice: (data['discountPrice'] as num?)?.toDouble() ?? 0.0,
+      description: data['description'] ?? '',
+      createdAt: data['createdAt'] != null
+          ? (data['createdAt'] as Timestamp).toDate()
+          : null,
+      salesCount: (data['salesCount'] as int?) ?? 0,
+      isPromotional: (data['isPromotional'] as bool?) ?? false,
+    );
+  }
+
   // Initialize all data with optimized loading
   Future<void> initializeAllData() async {
-    state = state.copyWith(isLoading: true);
+    // Guard: skip if already loaded successfully
+    if (state.isInitialized && !state.hasError) return;
+
+    state = state.copyWith(
+      isLoading: true,
+      hasError: false,
+      errorMessage: null,
+    );
 
     try {
       // Fetch data in parallel for better performance
@@ -79,12 +115,13 @@ class ProductNotifier extends Notifier<ProductState> {
       final allProducts = <Product>[];
       for (final categoryData in state.category.values) {
         final products = categoryData['products'] as List<Product>;
-        allProducts.addAll(products.take(2)); // Limit products per category
+        allProducts.addAll(products.take(2));
       }
 
       state = state.copyWith(
-        allProducts: allProducts.take(8).toList(), // Limit carousel items
+        allProducts: allProducts.take(8).toList(),
         isLoading: false,
+        isInitialized: true,
       );
 
       // Precache carousel images after data loading
@@ -92,7 +129,12 @@ class ProductNotifier extends Notifier<ProductState> {
         await precacheCarouselImages(allProducts);
       }
     } catch (error) {
-      state = state.copyWith(isLoading: false);
+      debugPrint('Error initializing data: $error');
+      state = state.copyWith(
+        isLoading: false,
+        hasError: true,
+        errorMessage: 'Failed to load data. Pull down to retry.',
+      );
     }
   }
 
@@ -113,61 +155,49 @@ class ProductNotifier extends Notifier<ProductState> {
           .limit(10)
           .get();
 
-      final products = querySnapshot.docs.map((doc) {
-        var data = doc.data();
-
-        return Product(
-          category: data['category'] ?? '',
-          subcategory: data['subcategory'] ?? '',
-          name: data['name'] ?? '',
-          quantity: data['quantity'] ?? 0,
-          imageUrl: (data['imageUrls'] as List<dynamic>?)?.first ?? '',
-          salePrice: (data['salePrice'] as num?)?.toDouble() ?? 0.0,
-          discountPrice: (data['discountPrice'] as num?)?.toDouble() ?? 0.0,
-          description: data['description'] ?? '',
-        );
-      }).toList();
+      final products =
+          querySnapshot.docs.map((doc) => _productFromDoc(doc.data())).toList();
 
       state = state.copyWith(
         products: products,
-        allProducts: products, // Updated to use allProducts
+        allProducts: products,
         isLoading: false,
-      ); // Precache images after products are loaded
+      );
       await precacheCarouselImages(products);
     } catch (error) {
-      state = state.copyWith(isLoading: false);
+      debugPrint('Error fetching products: $error');
+      state = state.copyWith(
+        isLoading: false,
+        hasError: true,
+        errorMessage: 'Failed to load products.',
+      );
     }
   }
 
-// Add this method to precache images with better memory management
+  // Precache images with better memory management
   Future<void> precacheCarouselImages(List<Product> products) async {
-    // Clear previous precached images to prevent memory leaks
     for (final image in _precachedImages) {
       image.evict();
     }
     _precachedImages.clear();
 
-    // Limit to 8 images for optimal memory usage
     final imagesToPrecache = products
         .take(8)
         .where((product) => product.imageUrl.isNotEmpty)
         .map((product) => CachedNetworkImageProvider(product.imageUrl))
         .toList();
 
-    // Precache images with error handling
     for (final imageProvider in imagesToPrecache) {
       try {
         if (!_precachedImages.contains(imageProvider)) {
           _precachedImages.add(imageProvider);
 
-          // Precache with limited memory usage
           final imageStream = imageProvider.resolve(
             const ImageConfiguration(
-              size: Size(400, 300), // Limit resolution for memory efficiency
+              size: Size(400, 300),
             ),
           );
 
-          // Add listener for preloading
           final completer = Completer<void>();
           late ImageStreamListener listener;
 
@@ -188,7 +218,6 @@ class ProductNotifier extends Notifier<ProductState> {
 
           imageStream.addListener(listener);
 
-          // Wait for image to load with timeout
           await completer.future.timeout(
             const Duration(seconds: 5),
             onTimeout: () {
@@ -197,7 +226,6 @@ class ProductNotifier extends Notifier<ProductState> {
           );
         }
       } catch (e) {
-        // Silently handle preloading errors
         continue;
       }
     }
@@ -222,21 +250,10 @@ class ProductNotifier extends Notifier<ProductState> {
             'products': <Product>[],
           };
         } else {
-          // Add subcategory to the existing category
           category[categoryName]!['subcategories'].add(subcategory);
         }
 
-        // Add product to the category
-        category[categoryName]!['products'].add(Product(
-          category: categoryName,
-          subcategory: subcategory,
-          name: data['name'] ?? '',
-          quantity: data['quantity'] ?? 0,
-          imageUrl: imageUrl,
-          salePrice: (data['salePrice'] as num?)?.toDouble() ?? 0.0,
-          discountPrice: (data['discountPrice'] as num?)?.toDouble() ?? 0.0,
-          description: data['description'] ?? '',
-        ));
+        category[categoryName]!['products'].add(_productFromDoc(data));
       }
 
       // Convert subcategories from Set to List
@@ -250,101 +267,118 @@ class ProductNotifier extends Notifier<ProductState> {
 
       state = state.copyWith(category: updatedCategory);
     } catch (error) {
-      // Handle error
+      debugPrint('Error fetching categories: $error');
+      state = state.copyWith(
+        hasError: true,
+        errorMessage: 'Failed to load categories.',
+      );
     }
   }
 
   Future<void> fetchPromotion() async {
     try {
+      // Use isPromotional flag for proper promotion filtering
       var querySnapshot = await FirebaseFirestore.instance
           .collection('products')
-          .where('salePrice', isGreaterThan: 100000)
+          .where('isPromotional', isEqualTo: true)
+          .limit(20)
           .get();
 
-      final promotion = querySnapshot.docs.map((doc) {
-        var data = doc.data();
-        return Product(
-          category: data['category'] ?? '',
-          subcategory: data['subcategory'] ?? '',
-          name: data['name'] ?? '',
-          quantity: data['quantity'] ?? 0,
-          imageUrl: (data['imageUrls'] as List<dynamic>?)?.first ?? '',
-          salePrice: (data['salePrice'] as num?)?.toDouble() ?? 0.0,
-          discountPrice: (data['discountPrice'] as num?)?.toDouble() ?? 0.0,
-          description: data['description'] ?? '',
-        );
-      }).toList();
+      // Fallback for old data without isPromotional field
+      if (querySnapshot.docs.isEmpty) {
+        querySnapshot = await FirebaseFirestore.instance
+            .collection('products')
+            .where('salePrice', isGreaterThan: 100000)
+            .get();
+      }
+
+      final promotion =
+          querySnapshot.docs.map((doc) => _productFromDoc(doc.data())).toList();
 
       state = state.copyWith(promotion: promotion);
     } catch (error) {
-      // No logging
+      debugPrint('Error fetching promotions: $error');
     }
   }
 
   Future<void> fetchSpecialCategories() async {
     try {
-      var latestQuerySnapshot = await FirebaseFirestore.instance
-          .collection('products')
-          .orderBy('salePrice', descending: true)
-          .limit(10)
-          .get();
+      // LATEST: Order by createdAt (real recency)
+      QuerySnapshot<Map<String, dynamic>> latestQuerySnapshot;
+      try {
+        latestQuerySnapshot = await FirebaseFirestore.instance
+            .collection('products')
+            .orderBy('createdAt', descending: true)
+            .limit(10)
+            .get();
+      } catch (_) {
+        // Fallback if createdAt field/index doesn't exist yet
+        latestQuerySnapshot = await FirebaseFirestore.instance
+            .collection('products')
+            .limit(10)
+            .get();
+      }
 
-      final latestProducts = latestQuerySnapshot.docs.map((doc) {
-        var data = doc.data();
-        return Product(
-          category: data['category'] ?? '',
-          subcategory: data['subcategory'] ?? '',
-          name: data['name'] ?? '',
-          quantity: data['quantity'] ?? 0,
-          imageUrl: (data['imageUrls'] as List<dynamic>?)?.first ?? '',
-          salePrice: (data['salePrice'] as num?)?.toDouble() ?? 0.0,
-          discountPrice: (data['discountPrice'] as num?)?.toDouble() ?? 0.0,
-          description: data['description'] ?? '',
-        );
-      }).toList();
+      // If query succeeded but returned nothing, use fallback
+      if (latestQuerySnapshot.docs.isEmpty) {
+        latestQuerySnapshot = await FirebaseFirestore.instance
+            .collection('products')
+            .limit(10)
+            .get();
+      }
 
-      // Fetch Most Popular Products by salePrice < 20000
-      var popularQuerySnapshot = await FirebaseFirestore.instance
-          .collection('products')
-          .where('salePrice', isLessThan: 20000) // Filter by salePrice < 20000
-          .limit(10)
-          .get();
+      final latestProducts = latestQuerySnapshot.docs
+          .map((doc) => _productFromDoc(doc.data()))
+          .toList();
 
-      final mostPopularProducts = popularQuerySnapshot.docs.map((doc) {
-        var data = doc.data();
-        return Product(
-          category: data['category'] ?? '',
-          subcategory: data['subcategory'] ?? '',
-          name: data['name'] ?? '',
-          quantity: data['quantity'] ?? 0,
-          imageUrl: (data['imageUrls'] as List<dynamic>?)?.first ?? '',
-          salePrice: (data['salePrice'] as num?)?.toDouble() ?? 0.0,
-          discountPrice: (data['discountPrice'] as num?)?.toDouble() ?? 0.0,
-          description: data['description'] ?? '',
-        );
-      }).toList();
+      // MOST POPULAR: Order by salesCount (real popularity)
+      QuerySnapshot<Map<String, dynamic>> popularQuerySnapshot;
+      try {
+        popularQuerySnapshot = await FirebaseFirestore.instance
+            .collection('products')
+            .orderBy('salesCount', descending: true)
+            .limit(10)
+            .get();
+      } catch (_) {
+        // Fallback if salesCount field/index doesn't exist yet
+        popularQuerySnapshot = await FirebaseFirestore.instance
+            .collection('products')
+            .limit(10)
+            .get();
+      }
 
-      // Fetch Recommended Products by salePrice > 200000
-      var recommendedQuerySnapshot = await FirebaseFirestore.instance
-          .collection('products')
-          .where('salePrice',
-              isGreaterThan: 200000) // Filter by salePrice > 200000
-          .limit(10)
-          .get();
+      if (popularQuerySnapshot.docs.isEmpty) {
+        popularQuerySnapshot = await FirebaseFirestore.instance
+            .collection('products')
+            .limit(10)
+            .get();
+      }
 
-      final recommendedProducts = recommendedQuerySnapshot.docs.map((doc) {
-        var data = doc.data();
-        return Product(
-          category: data['category'] ?? '',
-          subcategory: data['subcategory'] ?? '',
-          name: data['name'] ?? '',
-          quantity: data['quantity'] ?? 0,
-          imageUrl: (data['imageUrls'] as List<dynamic>?)?.first ?? '',
-          salePrice: (data['salePrice'] as num?)?.toDouble() ?? 0.0,
-          discountPrice: (data['discountPrice'] as num?)?.toDouble() ?? 0.0,
-          description: data['description'] ?? '',
-        );
-      }).toList();
+      final mostPopularProducts = popularQuerySnapshot.docs
+          .map((doc) => _productFromDoc(doc.data()))
+          .toList();
+
+      // RECOMMENDED: High sales + has a discount
+      QuerySnapshot<Map<String, dynamic>> recommendedQuerySnapshot;
+      try {
+        recommendedQuerySnapshot = await FirebaseFirestore.instance
+            .collection('products')
+            .orderBy('salesCount', descending: true)
+            .limit(20)
+            .get();
+      } catch (_) {
+        recommendedQuerySnapshot = await FirebaseFirestore.instance
+            .collection('products')
+            .limit(20)
+            .get();
+      }
+
+      final recommendedProducts = recommendedQuerySnapshot.docs
+          .map((doc) => _productFromDoc(doc.data()))
+          .where(
+              (p) => p.discountPrice > 0 && p.discountPrice < p.salePrice)
+          .take(10)
+          .toList();
 
       state = state.copyWith(
         latestProducts: latestProducts,
@@ -352,7 +386,11 @@ class ProductNotifier extends Notifier<ProductState> {
         recommendedProducts: recommendedProducts,
       );
     } catch (error) {
-      // No logging
+      debugPrint('Error fetching special categories: $error');
+      state = state.copyWith(
+        hasError: true,
+        errorMessage: 'Failed to load product sections.',
+      );
     }
   }
 }

@@ -1,21 +1,18 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:carousel_slider/carousel_slider.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:zalonidentalhub/models/cart_icon_with_badge.dart';
 import 'package:zalonidentalhub/screens/product_details.dart';
 import 'package:zalonidentalhub/screens/product_listing_page.dart';
-import 'package:cached_network_image/cached_network_image.dart';
-import '../providers/product_provider.dart';
+import 'package:zalonidentalhub/theme/app_theme.dart';
+import 'package:zalonidentalhub/widgets/shimmer_loading.dart';
+import '../providers/home_providers.dart';
 import '../models/product.dart';
 
-class HomeScreen extends ConsumerStatefulWidget {
-  const HomeScreen({super.key});
-
-  @override
-  ConsumerState<HomeScreen> createState() => _HomeScreenState();
-}
-
-// Helper function to format numbers with commas
+// ═══════════════════════════════════════════════════════════════════════════
+// Price formatter
+// ═══════════════════════════════════════════════════════════════════════════
 String _formatPrice(double price) {
   return 'UGX ${price.toStringAsFixed(2).replaceAllMapped(
         RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'),
@@ -23,154 +20,118 @@ String _formatPrice(double price) {
       )}';
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// HomeScreen — root widget
+// ═══════════════════════════════════════════════════════════════════════════
+class HomeScreen extends ConsumerStatefulWidget {
+  const HomeScreen({super.key});
+  @override
+  ConsumerState<HomeScreen> createState() => _HomeScreenState();
+}
+
 class _HomeScreenState extends ConsumerState<HomeScreen> {
   final TextEditingController _searchController = TextEditingController();
-  List<Product> _filteredProducts = [];
-  final CarouselSliderController _carouselController =
-      CarouselSliderController();
-  final ValueNotifier<int> _carouselIndexNotifier = ValueNotifier<int>(0);
+  bool _isSearchActive = false;
 
   @override
   void initState() {
     super.initState();
     _searchController.addListener(_onSearchChanged);
-    // Initialize data when the widget is first created
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      ref.read(productProvider.notifier).initializeAllData();
-    });
   }
 
   @override
   void dispose() {
     _searchController.removeListener(_onSearchChanged);
     _searchController.dispose();
-    _carouselIndexNotifier.dispose();
     super.dispose();
   }
 
   void _onSearchChanged() {
-    final query = _searchController.text.toLowerCase();
-    final productState = ref.read(productProvider);
-    setState(() {
-      _filteredProducts = productState.allProducts
-          .where((product) =>
-              product.name.toLowerCase().contains(query) ||
-              product.category.toLowerCase().contains(query))
-          .toList();
-    });
+    final isActive = _searchController.text.isNotEmpty;
+    if (_isSearchActive != isActive) {
+      setState(() => _isSearchActive = isActive);
+    }
+    ref.read(searchQueryProvider.notifier).update(_searchController.text);
+  }
+
+  Future<void> _onRefresh() async {
+    ref.invalidate(homeCategoriesProvider);
+    ref.invalidate(homePopularProvider);
+    ref.invalidate(homePromotionsProvider);
+    ref.invalidate(homeLatestProvider);
+    ref.invalidate(homeRecommendedProvider);
+    await Future.wait([
+      ref.read(homeCategoriesProvider.future),
+      ref.read(homePopularProvider.future),
+      ref.read(homePromotionsProvider.future),
+      ref.read(homeLatestProvider.future),
+      ref.read(homeRecommendedProvider.future),
+    ]);
   }
 
   @override
   Widget build(BuildContext context) {
-    final productState = ref.watch(productProvider);
-    //final screenWidth = MediaQuery.of(context).size.width;
-    //final screenHeight = MediaQuery.of(context).size.height;
-
     return Scaffold(
-      backgroundColor: Colors.grey[100],
+      backgroundColor: Theme.of(context).colorScheme.surfaceContainerLowest,
       body: SafeArea(
-        child: SingleChildScrollView(
-          physics: const BouncingScrollPhysics(),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              _buildHeader(),
-              const SizedBox(height: 20),
-              _buildSearchFilterRow(),
-              const SizedBox(height: 20),
-              if (_searchController.text.isNotEmpty)
-                _buildSearchResults(_filteredProducts)
-              else
-                Column(
-                  children: [
-                    _buildImageCarousel(
-                        productState.allProducts, productState.isLoading),
-                    const SizedBox(height: 20),
-                    _buildSwipeForMoreText(),
-                    _buildCategorySection(
-                        title: "Categories",
-                        onViewAll: () {
-                          _navigateToAllCategories();
-                        }),
-                    _buildResponsiveCategoryList(
-                        productState.category, context),
-                    const SizedBox(height: 20),
-                    _buildSwipeForMoreText(),
-                    _buildSection(
-                      title: "Most Popular",
-                      content: _buildProductSection(
-                          productState.mostPopularProducts),
-                      onViewAll: () {
-                        _navigateToProductListing(
-                          "Most Popular Products",
-                          productState.mostPopularProducts,
-                        );
-                      },
-                    ),
-                    _buildSwipeForMoreText(),
-                    _buildSection(
-                      title: "Promotion",
-                      content: _buildPromotionSection(productState.promotion),
-                      onViewAll: () {
-                        _navigateToProductListing(
-                          "Promotional Products",
-                          productState.promotion,
-                        );
-                      },
-                    ),
-                    _buildSwipeForMoreText(),
-                    _buildSection(
-                      title: "Latest",
-                      content:
-                          _buildProductSection(productState.latestProducts),
-                      onViewAll: () {
-                        _navigateToProductListing(
-                          "Latest Products",
-                          productState.latestProducts,
-                        );
-                      },
-                    ),
-                    _buildSwipeForMoreText(),
-                    _buildSection(
-                      title: "Recommended",
-                      content: _buildProductSection(
-                          productState.recommendedProducts),
-                      onViewAll: () {
-                        _navigateToProductListing(
-                          "Recommended Products",
-                          productState.recommendedProducts,
-                        );
-                      },
-                    ),
-                  ],
+        child: RefreshIndicator(
+          onRefresh: _onRefresh,
+          child: CustomScrollView(
+            physics: const AlwaysScrollableScrollPhysics(
+              parent: BouncingScrollPhysics(),
+            ),
+            slivers: [
+              const SliverToBoxAdapter(child: _HomeHeader()),
+              const SliverToBoxAdapter(child: SizedBox(height: 20)),
+              SliverToBoxAdapter(
+                child: _SearchBar(controller: _searchController),
+              ),
+              const SliverToBoxAdapter(child: SizedBox(height: 20)),
+              if (_isSearchActive)
+                const SliverToBoxAdapter(child: _SearchResultsSection())
+              else ...[
+                const SliverToBoxAdapter(child: _CarouselSection()),
+                const SliverToBoxAdapter(child: SizedBox(height: 20)),
+                const SliverToBoxAdapter(child: _CategoriesSection()),
+                const SliverToBoxAdapter(child: SizedBox(height: 20)),
+                SliverToBoxAdapter(
+                  child: _HomeProductSection(
+                    provider: homePopularProvider,
+                    title: 'Most Popular',
+                  ),
                 ),
+                const SliverToBoxAdapter(child: _HomePromotionsSection()),
+                SliverToBoxAdapter(
+                  child: _HomeProductSection(
+                    provider: homeLatestProvider,
+                    title: 'Latest',
+                  ),
+                ),
+                SliverToBoxAdapter(
+                  child: _HomeProductSection(
+                    provider: homeRecommendedProvider,
+                    title: 'Recommended',
+                  ),
+                ),
+              ],
+              const SliverToBoxAdapter(child: SizedBox(height: 24)),
             ],
           ),
         ),
       ),
     );
   }
+}
 
-  // Search Results Section
-  Widget _buildSearchResults(List<Product> products) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text(
-            "Search Results",
-            style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-          ),
-          const SizedBox(height: 10),
-          _buildProductSection(products),
-        ],
-      ),
-    );
-  }
+// ═══════════════════════════════════════════════════════════════════════════
+// Header — delivery location + notification
+// ═══════════════════════════════════════════════════════════════════════════
+class _HomeHeader extends StatelessWidget {
+  const _HomeHeader();
 
-  // Header Section
-  Widget _buildHeader() {
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
       child: Row(
@@ -179,48 +140,52 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text(
-                "Deliver To",
-                style: TextStyle(fontSize: 16, color: Colors.black54),
-              ),
+              Text('Deliver To',
+                  style:
+                      TextStyle(fontSize: 16, color: cs.onSurfaceVariant)),
               Row(
-                children: const [
-                  Icon(Icons.location_on, color: Colors.redAccent, size: 20),
-                  Text(
-                    "Kampala, Uganda",
-                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                  ),
-                  Icon(Icons.arrow_drop_down, color: Colors.redAccent),
+                children: [
+                  Icon(Icons.location_on, color: cs.error, size: 20),
+                  const Text('Kampala, Uganda',
+                      style: TextStyle(
+                          fontSize: 18, fontWeight: FontWeight.bold)),
+                  Icon(Icons.arrow_drop_down, color: cs.error),
                 ],
               ),
             ],
           ),
           IconButton(
-            icon: const Icon(Icons.notifications, color: Colors.grey),
-            onPressed: () {
-              // Handle notification button press
-            },
+            icon: Icon(Icons.notifications, color: cs.onSurfaceVariant),
+            onPressed: () {},
           ),
         ],
       ),
     );
   }
+}
 
-  // Search and Filter Row
-  Widget _buildSearchFilterRow() {
+// ═══════════════════════════════════════════════════════════════════════════
+// Search bar + cart icon
+// ═══════════════════════════════════════════════════════════════════════════
+class _SearchBar extends StatelessWidget {
+  final TextEditingController controller;
+  const _SearchBar({required this.controller});
+
+  @override
+  Widget build(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16),
       child: Row(
         children: [
           Expanded(
             child: TextField(
-              controller: _searchController,
+              controller: controller,
               decoration: InputDecoration(
-                hintText: "Search products...",
+                hintText: 'Search products...',
                 border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                prefixIcon: const Icon(Icons.search, color: Colors.grey),
+                    borderRadius: BorderRadius.circular(12)),
+                prefixIcon: Icon(Icons.search,
+                    color: Theme.of(context).colorScheme.onSurfaceVariant),
               ),
             ),
           ),
@@ -230,38 +195,99 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       ),
     );
   }
+}
 
-  // Optimized Image Carousel Section with Performance Improvements
-  Widget _buildImageCarousel(List<Product> allProducts, bool isLoading) {
-    if (isLoading || allProducts.isEmpty) {
-      return _buildCarouselLoadingState();
-    }
+// ═══════════════════════════════════════════════════════════════════════════
+// Carousel — watches homeCarouselProvider (derived from categories)
+// ═══════════════════════════════════════════════════════════════════════════
+class _CarouselSection extends ConsumerStatefulWidget {
+  const _CarouselSection();
+  @override
+  ConsumerState<_CarouselSection> createState() => _CarouselSectionState();
+}
 
-    // Limit carousel items for better performance
-    final carouselProducts = allProducts.take(8).toList();
+class _CarouselSectionState extends ConsumerState<_CarouselSection> {
+  final _controller = CarouselSliderController();
+  final _indexNotifier = ValueNotifier<int>(0);
 
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16),
-      child: Column(
-        children: [
-          _buildOptimizedCarousel(carouselProducts),
-          const SizedBox(height: 12),
-          _buildCarouselIndicators(carouselProducts.length),
-        ],
-      ),
+  @override
+  void dispose() {
+    _indexNotifier.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final carouselAsync = ref.watch(homeCarouselProvider);
+
+    return carouselAsync.when(
+      data: (products) {
+        if (products.isEmpty) return const SizedBox.shrink();
+        return Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: Column(
+            children: [
+              _buildCarousel(products),
+              const SizedBox(height: 12),
+              _buildIndicators(products.length),
+            ],
+          ),
+        );
+      },
+      loading: () => const CarouselSkeleton(),
+      error: (_, __) => const SizedBox.shrink(),
     );
   }
 
-  // Optimized Carousel with better memory management
-  Widget _buildOptimizedCarousel(List<Product> products) {
+  Widget _buildCarousel(List<Product> products) {
     return SizedBox(
       height: MediaQuery.of(context).size.height * 0.25,
       child: CarouselSlider.builder(
-        carouselController: _carouselController,
+        carouselController: _controller,
         itemCount: products.length,
-        itemBuilder: (context, index, realIndex) {
+        itemBuilder: (context, index, _) {
           final product = products[index];
-          return _buildCarouselItem(product, index);
+          return Semantics(
+            label:
+                '${product.name}, ${_formatPrice(product.discountPrice)}',
+            button: true,
+            child: Container(
+              margin: const EdgeInsets.symmetric(horizontal: 4),
+              child: Material(
+                borderRadius: BorderRadius.circular(12),
+                elevation: 2,
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(12),
+                  onTap: () => _navigateToProduct(context, product),
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(12),
+                    child: Stack(
+                      fit: StackFit.expand,
+                      children: [
+                        CachedNetworkImage(
+                          imageUrl: product.imageUrl,
+                          fit: BoxFit.cover,
+                          memCacheHeight: 400,
+                          memCacheWidth: 600,
+                          placeholder: (_, __) => Container(
+                              color: Theme.of(context)
+                                  .colorScheme
+                                  .surfaceContainerHighest),
+                          errorWidget: (_, __, ___) => Container(
+                              color: Theme.of(context)
+                                  .colorScheme
+                                  .surfaceContainerHighest,
+                              child: const Icon(Icons.error_outline,
+                                  size: 40)),
+                        ),
+                        _CarouselOverlay(product: product),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          );
         },
         options: CarouselOptions(
           viewportFraction: 1.0,
@@ -269,153 +295,52 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           autoPlayInterval: const Duration(seconds: 4),
           autoPlayAnimationDuration: const Duration(milliseconds: 800),
           autoPlayCurve: Curves.fastOutSlowIn,
-          enlargeCenterPage: false,
-          scrollDirection: Axis.horizontal,
-          onPageChanged: (index, reason) {
-            _carouselIndexNotifier.value = index;
-          },
+          onPageChanged: (index, _) => _indexNotifier.value = index,
         ),
       ),
     );
   }
 
-  // Optimized Carousel Item with lazy loading
-  Widget _buildCarouselItem(Product product, int index) {
-    return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 4),
-      child: Material(
-        borderRadius: BorderRadius.circular(12),
-        elevation: 2,
-        child: InkWell(
-          borderRadius: BorderRadius.circular(12),
-          onTap: () => _navigateToProductDetails(product),
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(12),
-            child: Stack(
-              fit: StackFit.expand,
-              children: [
-                _buildOptimizedImage(product.imageUrl),
-                _buildCarouselOverlay(product),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  // Optimized image loading with better caching
-  Widget _buildOptimizedImage(String imageUrl) {
-    return CachedNetworkImage(
-      imageUrl: imageUrl,
-      fit: BoxFit.cover,
-      memCacheHeight: 400, // Limit memory cache size
-      memCacheWidth: 600,
-      maxHeightDiskCache: 600,
-      maxWidthDiskCache: 800,
-      placeholder: (context, url) => _buildImagePlaceholder(),
-      errorWidget: (context, url, error) => _buildImageError(),
-      fadeInDuration: const Duration(milliseconds: 300),
-      fadeOutDuration: const Duration(milliseconds: 100),
-    );
-  }
-
-  // Optimized loading state
-  Widget _buildCarouselLoadingState() {
-    return Container(
-      height: MediaQuery.of(context).size.height * 0.25,
-      margin: const EdgeInsets.symmetric(horizontal: 16),
-      decoration: BoxDecoration(
-        color: Colors.grey[200],
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Center(
-        child: Column(
+  Widget _buildIndicators(int length) {
+    final cs = Theme.of(context).colorScheme;
+    return ValueListenableBuilder<int>(
+      valueListenable: _indexNotifier,
+      builder: (context, currentIndex, _) {
+        return Row(
           mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            SizedBox(
-              width: 40,
-              height: 40,
-              child: CircularProgressIndicator(
-                strokeWidth: 3,
-                valueColor: AlwaysStoppedAnimation<Color>(
-                  Theme.of(context).primaryColor,
+          children: List.generate(length, (index) {
+            final isActive = index == currentIndex;
+            return GestureDetector(
+              onTap: () {
+                _controller.animateToPage(index);
+                _indexNotifier.value = index;
+              },
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 300),
+                height: 8,
+                width: isActive ? 24 : 8,
+                margin: const EdgeInsets.symmetric(horizontal: 2),
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(4),
+                  color: isActive
+                      ? cs.primary
+                      : cs.surfaceContainerHighest,
                 ),
               ),
-            ),
-            const SizedBox(height: 12),
-            Text(
-              'Loading products...',
-              style: TextStyle(
-                color: Colors.grey[600],
-                fontSize: 14,
-              ),
-            ),
-          ],
-        ),
-      ),
+            );
+          }),
+        );
+      },
     );
   }
+}
 
-  // Image placeholder for better UX
-  Widget _buildImagePlaceholder() {
-    return Container(
-      color: Colors.grey[200],
-      child: Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(
-              Icons.image,
-              size: 48,
-              color: Colors.grey[400],
-            ),
-            const SizedBox(height: 8),
-            SizedBox(
-              width: 24,
-              height: 24,
-              child: CircularProgressIndicator(
-                strokeWidth: 2,
-                valueColor: AlwaysStoppedAnimation<Color>(
-                  Colors.grey[400]!,
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
+class _CarouselOverlay extends StatelessWidget {
+  final Product product;
+  const _CarouselOverlay({required this.product});
 
-  // Image error widget
-  Widget _buildImageError() {
-    return Container(
-      color: Colors.grey[100],
-      child: Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(
-              Icons.error_outline,
-              size: 48,
-              color: Colors.grey[400],
-            ),
-            const SizedBox(height: 8),
-            Text(
-              'Image not available',
-              style: TextStyle(
-                color: Colors.grey[600],
-                fontSize: 12,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  // Carousel overlay with product info
-  Widget _buildCarouselOverlay(Product product) {
+  @override
+  Widget build(BuildContext context) {
     return Positioned(
       bottom: 0,
       left: 0,
@@ -426,9 +351,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
             begin: Alignment.topCenter,
             end: Alignment.bottomCenter,
             colors: [
-              Colors.transparent,
-              Colors.black.withValues(alpha: 0.7),
-            ],
+                Colors.transparent,
+                Colors.black.withValues(alpha: 0.7)],
           ),
         ),
         padding: const EdgeInsets.all(16),
@@ -436,425 +360,632 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text(
-              product.name,
-              style: const TextStyle(
-                color: Colors.white,
-                fontSize: 16,
-                fontWeight: FontWeight.bold,
-              ),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-            ),
+            Text(product.name,
+                style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis),
             const SizedBox(height: 4),
-            Text(
-              _formatPrice(product.discountPrice),
-              style: const TextStyle(
-                color: Colors.white,
-                fontSize: 14,
-                fontWeight: FontWeight.w500,
-              ),
-            ),
+            Text(_formatPrice(product.discountPrice),
+                style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w500)),
           ],
         ),
       ),
     );
   }
+}
 
-  // Optimized carousel indicators using ValueListenableBuilder
-  Widget _buildCarouselIndicators(int length) {
-    return ValueListenableBuilder<int>(
-      valueListenable: _carouselIndexNotifier,
-      builder: (context, currentIndex, child) {
-        return Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: List.generate(length, (index) {
-            final isActive = index == currentIndex;
-            return GestureDetector(
-              onTap: () {
-                _carouselController.animateToPage(index);
-                _carouselIndexNotifier.value = index;
+// ═══════════════════════════════════════════════════════════════════════════
+// Categories — watches homeCategoriesProvider independently
+// ═══════════════════════════════════════════════════════════════════════════
+class _CategoriesSection extends ConsumerWidget {
+  const _CategoriesSection();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final categoriesAsync = ref.watch(homeCategoriesProvider);
+
+    return categoriesAsync.when(
+      data: (categories) {
+        if (categories.isEmpty) return const SizedBox.shrink();
+        return Column(
+          children: [
+            _SectionHeader(
+              title: 'Categories',
+              onViewAll: () {
+                final allProducts = <Product>[];
+                categories.forEach((_, data) {
+                  allProducts
+                      .addAll(data['products'] as List<Product>? ?? []);
+                });
+                Navigator.of(context).push(MaterialPageRoute(
+                  builder: (_) => ProductListingPage(
+                    title: 'All Categories',
+                    products: allProducts,
+                    categoryName: 'All Categories',
+                  ),
+                ));
               },
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 300),
-                height: 8,
-                width: isActive ? 24 : 8,
-                margin: const EdgeInsets.symmetric(horizontal: 2),
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(4),
-                  color: isActive
-                      ? const Color(0xFF146ABE)
-                      : const Color(0xFFEAEAEA),
+            ),
+            _CategoriesList(categories: categories),
+          ],
+        );
+      },
+      loading: () => const Column(
+        children: [
+          _SectionHeader(title: 'Categories'),
+          CategoriesSkeleton(),
+        ],
+      ),
+      error: (e, _) => SectionError(
+        message: 'Could not load categories',
+        onRetry: () => ref.invalidate(homeCategoriesProvider),
+      ),
+    );
+  }
+}
+
+class _CategoriesList extends StatelessWidget {
+  final Map<String, Map<String, dynamic>> categories;
+  const _CategoriesList({required this.categories});
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final screenWidth = constraints.maxWidth;
+        final itemsPerRow =
+            screenWidth < 600 ? 4 : (screenWidth < 1024 ? 6 : 8);
+        final itemWidth =
+            (screenWidth - (itemsPerRow + 1) * 8) / itemsPerRow;
+        final clampedWidth = itemWidth.clamp(70.0, 120.0);
+
+        return SizedBox(
+          height: clampedWidth + 40,
+          child: ListView.builder(
+            scrollDirection: Axis.horizontal,
+            physics: const BouncingScrollPhysics(),
+            itemCount: categories.length,
+            cacheExtent: screenWidth * 2,
+            itemBuilder: (context, index) {
+              final name = categories.keys.elementAt(index);
+              final data = categories[name]!;
+              return Semantics(
+                label: '$name category',
+                button: true,
+                child: Container(
+                  width: clampedWidth,
+                  margin: const EdgeInsets.symmetric(
+                      horizontal: 8, vertical: 4),
+                  child: Material(
+                    color: Theme.of(context)
+                        .colorScheme
+                        .surfaceContainerHighest,
+                    borderRadius: BorderRadius.circular(12),
+                    elevation: 1,
+                    child: InkWell(
+                      borderRadius: BorderRadius.circular(12),
+                      onTap: () {
+                        Navigator.of(context).push(MaterialPageRoute(
+                          builder: (_) => ProductDetails(
+                            key: ValueKey(name),
+                            categoryName: name,
+                            categoryImageUrl: data['imageUrl'] as String,
+                            subcategories:
+                                data['subcategories'] as List<String>,
+                            products: data['products'] as List<Product>,
+                          ),
+                        ));
+                      },
+                      child: Padding(
+                        padding: const EdgeInsets.all(6),
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Expanded(
+                              flex: 3,
+                              child: ClipRRect(
+                                borderRadius: BorderRadius.circular(8),
+                                child: CachedNetworkImage(
+                                  imageUrl: data['imageUrl'] as String,
+                                  fit: BoxFit.cover,
+                                  memCacheHeight: 120,
+                                  memCacheWidth: 120,
+                                  placeholder: (_, __) => Icon(
+                                      Icons.category,
+                                      color: Theme.of(context)
+                                          .colorScheme
+                                          .onSurfaceVariant,
+                                      size: 25),
+                                  errorWidget: (_, __, ___) => Icon(
+                                      Icons.error_outline,
+                                      color: Theme.of(context)
+                                          .colorScheme
+                                          .onSurfaceVariant,
+                                      size: 25),
+                                ),
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Expanded(
+                              flex: 2,
+                              child: Text(name,
+                                  style: const TextStyle(
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w500),
+                                  textAlign: TextAlign.center,
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
                 ),
-              ),
-            );
-          }),
+              );
+            },
+          ),
         );
       },
     );
   }
+}
 
-  // Helper method for navigation
-  void _navigateToProductDetails(Product product) {
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (context) => ProductDetails(
-          key: ValueKey(product.name),
-          products: [product],
-          categoryName: product.category,
-          categoryImageUrl: product.imageUrl,
-          subcategories: [],
+// ═══════════════════════════════════════════════════════════════════════════
+// Generic product section — watches any FutureProvider<List<Product>>
+// Each instance rebuilds independently (key performance win)
+// ═══════════════════════════════════════════════════════════════════════════
+class _HomeProductSection extends ConsumerWidget {
+  final FutureProvider<List<Product>> provider;
+  final String title;
+
+  const _HomeProductSection({
+    required this.provider,
+    required this.title,
+  });
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final asyncProducts = ref.watch(provider);
+
+    return asyncProducts.when(
+      data: (products) {
+        if (products.isEmpty) return const SizedBox.shrink();
+        return Padding(
+          padding: const EdgeInsets.symmetric(vertical: 10),
+          child: Column(
+            children: [
+              _SectionHeader(
+                title: title,
+                onViewAll: () {
+                  Navigator.of(context).push(MaterialPageRoute(
+                    builder: (_) => ProductListingPage(
+                      title: title,
+                      products: products,
+                      categoryName: title,
+                    ),
+                  ));
+                },
+              ),
+              const SizedBox(height: 10),
+              _HorizontalProductList(products: products),
+            ],
+          ),
+        );
+      },
+      loading: () => Padding(
+        padding: const EdgeInsets.symmetric(vertical: 10),
+        child: Column(
+          children: [
+            _SectionHeader(title: title),
+            const SizedBox(height: 10),
+            const HorizontalListSkeleton(),
+          ],
+        ),
+      ),
+      error: (e, _) => Padding(
+        padding: const EdgeInsets.symmetric(vertical: 8),
+        child: SectionError(
+          message: 'Could not load $title',
+          onRetry: () => ref.invalidate(provider),
         ),
       ),
     );
   }
+}
 
-  // Helper method for product listing navigation
-  void _navigateToProductListing(String title, List<Product> products) {
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (context) => ProductListingPage(
-          title: title,
-          products: products,
-          categoryName: title,
+// ═══════════════════════════════════════════════════════════════════════════
+// Promotions section — special card design with PROMO badge
+// ═══════════════════════════════════════════════════════════════════════════
+class _HomePromotionsSection extends ConsumerWidget {
+  const _HomePromotionsSection();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final asyncPromos = ref.watch(homePromotionsProvider);
+
+    return asyncPromos.when(
+      data: (products) {
+        if (products.isEmpty) return const SizedBox.shrink();
+        return Padding(
+          padding: const EdgeInsets.symmetric(vertical: 10),
+          child: Column(
+            children: [
+              _SectionHeader(
+                title: 'Promotion',
+                onViewAll: () {
+                  Navigator.of(context).push(MaterialPageRoute(
+                    builder: (_) => ProductListingPage(
+                      title: 'Promotional Products',
+                      products: products,
+                      categoryName: 'Promotional Products',
+                    ),
+                  ));
+                },
+              ),
+              const SizedBox(height: 10),
+              _HorizontalPromotionList(products: products),
+            ],
+          ),
+        );
+      },
+      loading: () => Padding(
+        padding: const EdgeInsets.symmetric(vertical: 10),
+        child: Column(
+          children: const [
+            _SectionHeader(title: 'Promotion'),
+            SizedBox(height: 10),
+            HorizontalListSkeleton(),
+          ],
         ),
+      ),
+      error: (e, _) => SectionError(
+        message: 'Could not load promotions',
+        onRetry: () => ref.invalidate(homePromotionsProvider),
       ),
     );
   }
+}
 
-  // Helper method for all categories navigation
-  void _navigateToAllCategories() {
-    final productState = ref.read(productProvider);
-    final allProducts = <Product>[];
+// ═══════════════════════════════════════════════════════════════════════════
+// Search results — watches homeSearchResultsProvider
+// ═══════════════════════════════════════════════════════════════════════════
+class _SearchResultsSection extends ConsumerWidget {
+  const _SearchResultsSection();
 
-    // Collect all products from all categories
-    productState.category.forEach((categoryName, categoryData) {
-      final products = categoryData['products'] as List<Product>? ?? [];
-      allProducts.addAll(products);
-    });
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final resultsAsync = ref.watch(homeSearchResultsProvider);
 
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (context) => ProductListingPage(
-          title: "All Categories",
-          products: allProducts,
-          categoryName: "All Categories",
-        ),
-      ),
-    );
-  }
-
-  // Section Builder
-  Widget _buildSection({
-    required String title,
-    required Widget content,
-    required VoidCallback onViewAll,
-  }) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 10),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 20),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Text(
-                  title,
-                  style: const TextStyle(
-                      fontSize: 18, fontWeight: FontWeight.bold),
-                ),
-                GestureDetector(
-                  onTap: () {
-                    onViewAll();
-                  },
-                  child: const Text(
-                    "View All",
-                    style: TextStyle(color: Colors.redAccent, fontSize: 14),
-                  ),
-                ),
-              ],
+    return resultsAsync.when(
+      data: (products) {
+        if (products.isEmpty) {
+          return const Padding(
+            padding: EdgeInsets.all(32),
+            child: Center(
+              child: Text('No products found',
+                  style: TextStyle(color: Colors.grey, fontSize: 16)),
             ),
-          ),
-          const SizedBox(height: 10),
-          content,
-        ],
-      ),
-    );
-  }
-
-  // Category Section
-  Widget _buildCategorySection({
-    required String title,
-    required VoidCallback onViewAll,
-  }) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Text(
-            title,
-            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-          ),
-          GestureDetector(
-            onTap: () {
-              onViewAll();
-            },
-            child: const Text(
-              "View All",
-              style: TextStyle(color: Colors.blue),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  // Optimized Responsive Category List
-  Widget _buildResponsiveCategoryList(
-      Map<String, Map<String, dynamic>> category, BuildContext context) {
-    final screenWidth = MediaQuery.of(context).size.width;
-    final itemWidth = (screenWidth - 48) / 4;
-
-    return SizedBox(
-      height: 120,
-      child: ListView.builder(
-        scrollDirection: Axis.horizontal,
-        physics: const BouncingScrollPhysics(),
-        itemCount: category.length,
-        cacheExtent: screenWidth * 2, // Cache items for smoother scrolling
-        itemBuilder: (context, index) {
-          String categoryName = category.keys.elementAt(index);
-          String imageUrl = category[categoryName]!['imageUrl'];
-          List<String> subcategories = category[categoryName]!['subcategories'];
-          List<Product> products = category[categoryName]!['products'];
-
-          return _buildCategoryItem(
-            categoryName: categoryName,
-            imageUrl: imageUrl,
-            subcategories: subcategories,
-            products: products,
-            itemWidth: itemWidth,
           );
-        },
-      ),
-    );
-  }
-
-  // Optimized Category Item
-  Widget _buildCategoryItem({
-    required String categoryName,
-    required String imageUrl,
-    required List<String> subcategories,
-    required List<Product> products,
-    required double itemWidth,
-  }) {
-    return Container(
-      width: itemWidth,
-      margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      child: Material(
-        color: Colors.grey[200],
-        borderRadius: BorderRadius.circular(12),
-        elevation: 1,
-        child: InkWell(
-          borderRadius: BorderRadius.circular(12),
-          onTap: () => _navigateToCategoryDetails(
-            categoryName,
-            imageUrl,
-            subcategories,
-            products,
-          ),
-          child: Padding(
-            padding: const EdgeInsets.all(6),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Expanded(
-                  flex: 3,
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(8),
-                    child: CachedNetworkImage(
-                      imageUrl: imageUrl,
-                      height: 50,
-                      width: 50,
-                      fit: BoxFit.cover,
-                      memCacheHeight: 120,
-                      memCacheWidth: 120,
-                      placeholder: (context, url) => Container(
-                        height: 50,
-                        width: 50,
-                        decoration: BoxDecoration(
-                          color: Colors.grey[300],
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: Icon(
-                          Icons.category,
-                          color: Colors.grey[400],
-                          size: 25,
-                        ),
-                      ),
-                      errorWidget: (context, error, stackTrace) => Container(
-                        height: 50,
-                        width: 50,
-                        decoration: BoxDecoration(
-                          color: Colors.grey[300],
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: Icon(
-                          Icons.error_outline,
-                          color: Colors.grey[400],
-                          size: 25,
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Expanded(
-                  flex: 2,
-                  child: Text(
-                    categoryName,
-                    style: const TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w500,
-                    ),
-                    textAlign: TextAlign.center,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  // Helper method for category navigation
-  void _navigateToCategoryDetails(
-    String categoryName,
-    String imageUrl,
-    List<String> subcategories,
-    List<Product> products,
-  ) {
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (context) => ProductDetails(
-          key: ValueKey(categoryName),
-          categoryName: categoryName,
-          categoryImageUrl: imageUrl,
-          subcategories: subcategories,
-          products: products,
-        ),
-      ),
-    );
-  }
-
-  // Optimized Product Section with better performance
-  Widget _buildProductSection(List<Product> products) {
-    if (products.isEmpty) {
-      return const Center(
-        child: Padding(
-          padding: EdgeInsets.all(32),
-          child: Text(
-            "No Products Available",
-            style: TextStyle(
-              color: Colors.grey,
-              fontSize: 16,
-            ),
-          ),
-        ),
-      );
-    }
-
-    return SizedBox(
-      height: 240,
-      child: ListView.builder(
-        scrollDirection: Axis.horizontal,
-        physics: const BouncingScrollPhysics(),
-        itemCount: products.length,
-        cacheExtent: MediaQuery.of(context).size.width * 1.5,
-        itemBuilder: (context, index) {
-          final product = products[index];
-          return _buildOptimizedProductCard(product);
-        },
-      ),
-    );
-  }
-
-  // Optimized Product Card
-  Widget _buildOptimizedProductCard(Product product) {
-    final hasDiscount =
-        product.salePrice > 0 && product.salePrice != product.discountPrice;
-    final discountPercentage = hasDiscount
-        ? ((1 - (product.discountPrice / product.salePrice)) * 100)
-        : 0.0;
-
-    return Container(
-      width: 160,
-      margin: const EdgeInsets.only(left: 12, right: 4),
-      child: Material(
-        borderRadius: BorderRadius.circular(12),
-        elevation: 2,
-        child: InkWell(
-          borderRadius: BorderRadius.circular(12),
-          onTap: () => _navigateToProductDetails(product),
+        }
+        return Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              _buildProductImage(product, discountPercentage, hasDiscount),
-              _buildProductInfo(product, hasDiscount),
+              Text('Search Results',
+                  style: Theme.of(context)
+                      .textTheme
+                      .titleMedium
+                      ?.copyWith(fontWeight: FontWeight.bold)),
+              const SizedBox(height: 10),
+              _HorizontalProductList(products: products),
             ],
+          ),
+        );
+      },
+      loading: () => const Padding(
+        padding: EdgeInsets.symmetric(horizontal: 16),
+        child: HorizontalListSkeleton(),
+      ),
+      error: (_, __) =>
+          const SectionError(message: 'Search failed'),
+    );
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Section header — title + accessible "View All" TextButton
+// ═══════════════════════════════════════════════════════════════════════════
+class _SectionHeader extends StatelessWidget {
+  final String title;
+  final VoidCallback? onViewAll;
+  const _SectionHeader({required this.title, this.onViewAll});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 20),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(title,
+              style: const TextStyle(
+                  fontSize: 18, fontWeight: FontWeight.bold)),
+          if (onViewAll != null)
+            TextButton(
+              onPressed: onViewAll,
+              child: Text('View All',
+                  style: TextStyle(
+                      color: Theme.of(context).colorScheme.primary,
+                      fontSize: 14)),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Horizontal product list (shared by Popular, Latest, Recommended, Search)
+// ═══════════════════════════════════════════════════════════════════════════
+class _HorizontalProductList extends StatelessWidget {
+  final List<Product> products;
+  const _HorizontalProductList({required this.products});
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final screenWidth = constraints.maxWidth;
+        final cardWidth = (screenWidth * 0.4).clamp(140.0, 200.0);
+        final sectionHeight = cardWidth * 1.5;
+
+        return SizedBox(
+          height: sectionHeight,
+          child: ListView.builder(
+            scrollDirection: Axis.horizontal,
+            physics: const BouncingScrollPhysics(),
+            itemCount: products.length,
+            cacheExtent: screenWidth * 1.5,
+            itemBuilder: (context, index) =>
+                _ProductCard(
+                    product: products[index], cardWidth: cardWidth),
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _HorizontalPromotionList extends StatelessWidget {
+  final List<Product> products;
+  const _HorizontalPromotionList({required this.products});
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final screenWidth = constraints.maxWidth;
+        final cardWidth = (screenWidth * 0.4).clamp(140.0, 200.0);
+        final sectionHeight = cardWidth * 1.5;
+
+        return SizedBox(
+          height: sectionHeight,
+          child: ListView.builder(
+            scrollDirection: Axis.horizontal,
+            physics: const BouncingScrollPhysics(),
+            itemCount: products.length,
+            cacheExtent: screenWidth * 1.5,
+            itemBuilder: (context, index) =>
+                _PromotionCard(
+                    product: products[index], cardWidth: cardWidth),
+          ),
+        );
+      },
+    );
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Product card
+// ═══════════════════════════════════════════════════════════════════════════
+class _ProductCard extends StatelessWidget {
+  final Product product;
+  final double cardWidth;
+  const _ProductCard({required this.product, required this.cardWidth});
+
+  @override
+  Widget build(BuildContext context) {
+    final hasDiscount =
+        product.salePrice > 0 &&
+        product.salePrice != product.discountPrice;
+    final discountPct = hasDiscount
+        ? ((1 - (product.discountPrice / product.salePrice)) * 100)
+        : 0.0;
+    final imageH = cardWidth * 0.8125;
+
+    return Semantics(
+      label:
+          '${product.name}, ${_formatPrice(product.discountPrice)}'
+          '${hasDiscount ? ', ${discountPct.toStringAsFixed(0)}% off' : ''}',
+      button: true,
+      child: Container(
+        width: cardWidth,
+        margin: const EdgeInsets.only(left: 12, right: 4),
+        child: Material(
+          borderRadius: BorderRadius.circular(12),
+          elevation: 2,
+          child: InkWell(
+            borderRadius: BorderRadius.circular(12),
+            onTap: () => _navigateToProduct(context, product),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _CardImage(
+                  product: product,
+                  width: cardWidth,
+                  height: imageH,
+                  hasDiscount: hasDiscount,
+                  discountPct: discountPct,
+                ),
+                Expanded(
+                  child: _CardInfo(
+                    product: product,
+                    hasDiscount: hasDiscount,
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
       ),
     );
   }
+}
 
-  // Optimized Product Image with overlay
-  Widget _buildProductImage(
-      Product product, double discountPercentage, bool hasDiscount) {
+// ═══════════════════════════════════════════════════════════════════════════
+// Promotion card — PROMO badge
+// ═══════════════════════════════════════════════════════════════════════════
+class _PromotionCard extends StatelessWidget {
+  final Product product;
+  final double cardWidth;
+  const _PromotionCard({required this.product, required this.cardWidth});
+
+  @override
+  Widget build(BuildContext context) {
+    final hasDiscount = product.discountPrice > 0 &&
+        product.discountPrice != product.salePrice;
+    final discountPct = hasDiscount
+        ? ((1 - (product.discountPrice / product.salePrice)) * 100)
+        : 0.0;
+    final imageH = cardWidth * 0.8125;
+
+    return Semantics(
+      label:
+          'Promotion: ${product.name}, ${_formatPrice(product.discountPrice)}',
+      button: true,
+      child: Container(
+        width: cardWidth,
+        margin: const EdgeInsets.only(left: 12, right: 4),
+        child: Material(
+          borderRadius: BorderRadius.circular(12),
+          elevation: 3,
+          child: InkWell(
+            borderRadius: BorderRadius.circular(12),
+            onTap: () => _navigateToProduct(context, product),
+            child: Stack(
+              children: [
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _CardImage(
+                      product: product,
+                      width: cardWidth,
+                      height: imageH,
+                      hasDiscount: hasDiscount,
+                      discountPct: discountPct,
+                    ),
+                    Expanded(
+                      child: _CardInfo(
+                        product: product,
+                        hasDiscount: hasDiscount,
+                      ),
+                    ),
+                  ],
+                ),
+                Positioned(
+                  top: 0,
+                  left: 0,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: AppTheme.promoBadgeColor(context),
+                      borderRadius: const BorderRadius.only(
+                        topLeft: Radius.circular(12),
+                        bottomRight: Radius.circular(8),
+                      ),
+                    ),
+                    child: const Text('PROMO',
+                        style: TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 10)),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Shared card sub-widgets
+// ═══════════════════════════════════════════════════════════════════════════
+class _CardImage extends StatelessWidget {
+  final Product product;
+  final double width;
+  final double height;
+  final bool hasDiscount;
+  final double discountPct;
+
+  const _CardImage({
+    required this.product,
+    required this.width,
+    required this.height,
+    required this.hasDiscount,
+    required this.discountPct,
+  });
+
+  @override
+  Widget build(BuildContext context) {
     return Stack(
       children: [
         ClipRRect(
-          borderRadius: const BorderRadius.vertical(top: Radius.circular(12)),
+          borderRadius:
+              const BorderRadius.vertical(top: Radius.circular(12)),
           child: CachedNetworkImage(
             imageUrl: product.imageUrl,
-            height: 130,
-            width: 160,
+            height: height,
+            width: width,
             fit: BoxFit.cover,
             memCacheHeight: 260,
             memCacheWidth: 320,
-            placeholder: (context, url) => Container(
-              height: 130,
-              width: 160,
-              color: Colors.grey[200],
+            placeholder: (_, __) => Container(
+              height: height,
+              width: width,
+              color:
+                  Theme.of(context).colorScheme.surfaceContainerHighest,
               child: Center(
                 child: SizedBox(
                   width: 24,
                   height: 24,
                   child: CircularProgressIndicator(
                     strokeWidth: 2,
-                    valueColor: AlwaysStoppedAnimation<Color>(
-                      Theme.of(context).primaryColor,
-                    ),
+                    color: Theme.of(context).colorScheme.primary,
                   ),
                 ),
               ),
             ),
-            errorWidget: (context, url, error) => Container(
-              height: 130,
-              width: 160,
-              color: Colors.grey[200],
-              child: Icon(
-                Icons.error_outline,
-                color: Colors.grey[400],
-                size: 40,
-              ),
+            errorWidget: (_, __, ___) => Container(
+              height: height,
+              width: width,
+              color:
+                  Theme.of(context).colorScheme.surfaceContainerHighest,
+              child: Icon(Icons.error_outline,
+                  color:
+                      Theme.of(context).colorScheme.onSurfaceVariant,
+                  size: 40),
             ),
           ),
         ),
@@ -863,325 +994,86 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
             top: 8,
             right: 8,
             child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+              padding: const EdgeInsets.symmetric(
+                  horizontal: 6, vertical: 4),
               decoration: BoxDecoration(
-                color: Colors.orange,
+                color: AppTheme.discountBadgeColor(context),
                 borderRadius: BorderRadius.circular(8),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.2),
-                    blurRadius: 4,
-                    offset: const Offset(0, 2),
-                  ),
-                ],
               ),
               child: Text(
-                '${discountPercentage.toStringAsFixed(0)}%',
+                '${discountPct.toStringAsFixed(0)}%',
                 style: const TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.bold,
-                  fontSize: 12,
-                ),
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 12),
               ),
             ),
           ),
       ],
     );
   }
+}
 
-  // Product Information Section
-  Widget _buildProductInfo(Product product, bool hasDiscount) {
-    return Expanded(
-      child: Padding(
-        padding: const EdgeInsets.all(8),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Flexible(
-              child: Text(
-                product.name,
+class _CardInfo extends StatelessWidget {
+  final Product product;
+  final bool hasDiscount;
+  const _CardInfo({required this.product, required this.hasDiscount});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.all(8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Flexible(
+            child: Text(product.name,
                 style: const TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w500,
-                  height: 1.1,
-                ),
+                    fontSize: 13,
+                    fontWeight: FontWeight.w500,
+                    height: 1.1),
                 maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-              ),
-            ),
-            const SizedBox(height: 1),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  _formatPrice(product.discountPrice),
-                  style: const TextStyle(
-                    fontWeight: FontWeight.bold,
-                    color: Color(0xFF2E7D32),
-                    fontSize: 14,
-                  ),
-                ),
-                if (hasDiscount) ...[
-                  const SizedBox(height: 1),
-                  Text(
-                    _formatPrice(product.salePrice),
-                    style: TextStyle(
-                      decoration: TextDecoration.lineThrough,
-                      color: Colors.grey[600],
-                      fontSize: 11,
-                    ),
-                  ),
-                ],
-              ],
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  // Optimized Promotion Section
-  Widget _buildPromotionSection(List<Product> promotions) {
-    if (promotions.isEmpty) {
-      return const Center(
-        child: Padding(
-          padding: EdgeInsets.all(32),
-          child: Text(
-            "No Promotions Available",
-            style: TextStyle(
-              color: Colors.grey,
-              fontSize: 16,
-            ),
+                overflow: TextOverflow.ellipsis),
           ),
-        ),
-      );
-    }
-
-    return SizedBox(
-      height: 240,
-      child: ListView.builder(
-        scrollDirection: Axis.horizontal,
-        physics: const BouncingScrollPhysics(),
-        itemCount: promotions.length,
-        cacheExtent: MediaQuery.of(context).size.width * 1.5,
-        itemBuilder: (context, index) {
-          final product = promotions[index];
-          return _buildPromotionCard(product);
-        },
-      ),
-    );
-  }
-
-  // Optimized Promotion Card
-  Widget _buildPromotionCard(Product product) {
-    final hasDiscount =
-        product.discountPrice > 0 && product.discountPrice != product.salePrice;
-    final discountPercentage = hasDiscount
-        ? ((1 - (product.discountPrice / product.salePrice)) * 100)
-        : 0.0;
-
-    return Container(
-      width: 160,
-      margin: const EdgeInsets.only(left: 12, right: 4),
-      child: Material(
-        borderRadius: BorderRadius.circular(12),
-        elevation: 3,
-        child: InkWell(
-          borderRadius: BorderRadius.circular(12),
-          onTap: () {
-            Navigator.of(context).push(
-              MaterialPageRoute(
-                builder: (context) => ProductDetails(
-                  key: ValueKey(product.name),
-                  products: [product],
-                  categoryName: '',
-                  categoryImageUrl: '',
-                  subcategories: [],
-                ),
-              ),
-            );
-          },
-          child: Stack(
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
             children: [
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  _buildPromotionImage(product),
-                  _buildPromotionInfo(product, hasDiscount),
-                ],
-              ),
-              // Promotion badge
-              Positioned(
-                top: 0,
-                left: 0,
-                child: Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                  decoration: const BoxDecoration(
-                    color: Colors.red,
-                    borderRadius: BorderRadius.only(
-                      topLeft: Radius.circular(12),
-                      bottomRight: Radius.circular(8),
-                    ),
-                  ),
-                  child: const Text(
-                    'PROMO',
-                    style: TextStyle(
-                      color: Colors.white,
+              Text(_formatPrice(product.discountPrice),
+                  style: TextStyle(
                       fontWeight: FontWeight.bold,
-                      fontSize: 10,
-                    ),
-                  ),
-                ),
-              ),
+                      color: AppTheme.priceColor(context),
+                      fontSize: 14)),
               if (hasDiscount)
-                Positioned(
-                  top: 8,
-                  right: 8,
-                  child: Container(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
-                    decoration: BoxDecoration(
-                      color: Colors.orange,
-                      borderRadius: BorderRadius.circular(8),
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.black.withValues(alpha: 0.2),
-                          blurRadius: 4,
-                          offset: const Offset(0, 2),
-                        ),
-                      ],
-                    ),
-                    child: Text(
-                      '-${discountPercentage.toStringAsFixed(0)}%',
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.bold,
-                        fontSize: 12,
-                      ),
-                    ),
-                  ),
-                ),
+                Text(_formatPrice(product.salePrice),
+                    style: TextStyle(
+                        decoration: TextDecoration.lineThrough,
+                        color: Theme.of(context)
+                            .colorScheme
+                            .onSurfaceVariant,
+                        fontSize: 11)),
             ],
           ),
-        ),
+        ],
       ),
     );
   }
+}
 
-  // Promotion Image
-  Widget _buildPromotionImage(Product product) {
-    return ClipRRect(
-      borderRadius: const BorderRadius.vertical(top: Radius.circular(12)),
-      child: CachedNetworkImage(
-        imageUrl: product.imageUrl,
-        height: 130,
-        width: 160,
-        fit: BoxFit.cover,
-        memCacheHeight: 260,
-        memCacheWidth: 320,
-        placeholder: (context, url) => Container(
-          height: 130,
-          width: 160,
-          color: Colors.grey[200],
-          child: Center(
-            child: SizedBox(
-              width: 24,
-              height: 24,
-              child: CircularProgressIndicator(
-                strokeWidth: 2,
-                valueColor: AlwaysStoppedAnimation<Color>(
-                  Theme.of(context).primaryColor,
-                ),
-              ),
-            ),
-          ),
-        ),
-        errorWidget: (context, url, error) => Container(
-          height: 130,
-          width: 160,
-          color: Colors.grey[200],
-          child: Icon(
-            Icons.error_outline,
-            color: Colors.grey[400],
-            size: 40,
-          ),
-        ),
+// ═══════════════════════════════════════════════════════════════════════════
+// Navigation helper
+// ═══════════════════════════════════════════════════════════════════════════
+void _navigateToProduct(BuildContext context, Product product) {
+  Navigator.of(context).push(
+    MaterialPageRoute(
+      builder: (_) => ProductDetails(
+        key: ValueKey(product.name),
+        products: [product],
+        categoryName: product.category,
+        categoryImageUrl: product.imageUrl,
+        subcategories: [],
       ),
-    );
-  }
-
-  // Promotion Information
-  Widget _buildPromotionInfo(Product product, bool hasDiscount) {
-    return Expanded(
-      child: Padding(
-        padding: const EdgeInsets.all(8),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Flexible(
-              child: Text(
-                product.name,
-                style: const TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w500,
-                  height: 1.1,
-                ),
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-              ),
-            ),
-            const SizedBox(height: 1),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  _formatPrice(product.discountPrice),
-                  style: const TextStyle(
-                    fontWeight: FontWeight.bold,
-                    color: Color(0xFF2E7D32),
-                    fontSize: 14,
-                  ),
-                ),
-                if (hasDiscount) ...[
-                  const SizedBox(height: 1),
-                  Text(
-                    _formatPrice(product.salePrice),
-                    style: TextStyle(
-                      decoration: TextDecoration.lineThrough,
-                      color: Colors.grey[600],
-                      fontSize: 11,
-                    ),
-                  ),
-                ],
-              ],
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  // Swipe for More Text
-  Widget _buildSwipeForMoreText() {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.symmetric(vertical: 10),
-      color: Colors.blue,
-      alignment: Alignment.center,
-      child: const Text(
-        "Swipe for More",
-        style: TextStyle(
-          fontSize: 14,
-          color: Colors.white,
-        ),
-      ),
-    );
-  }
+    ),
+  );
 }

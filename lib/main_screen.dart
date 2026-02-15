@@ -1,12 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:zalonidentalhub/models/cart_model.dart';
-//import 'package:zalonidentalhub/models/cart_model.dart';
 import 'package:zalonidentalhub/screens/account_screen.dart';
 import 'package:zalonidentalhub/screens/cart_screen.dart';
 import 'package:zalonidentalhub/screens/category_screen.dart';
 import 'package:zalonidentalhub/screens/home_screen.dart';
-
-
 
 class MainScreen extends StatefulWidget {
   const MainScreen({super.key});
@@ -21,36 +18,42 @@ class _MainScreenState extends State<MainScreen> {
   final List<Widget> _widgetOptions = [
     const HomeScreen(),
     const CategoriesScreen(),
-     CartScreen(cartItems: const [], cartTotal: 0, cart: Cart(), user: null,),
-  
+    CartScreen(cartItems: const [], cartTotal: 0, cart: Cart(), user: null),
     const AccountScreen(),
   ];
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      // appBar: AppBar(
-      // //  title: const Text('Main App'),
-      // ),
       body: IndexedStack(
         index: _selectedIndex,
         children: _widgetOptions,
       ),
-      bottomNavigationBar: BottomNavigationBar(
-        currentIndex: _selectedIndex,        
-        selectedItemColor: const Color.fromARGB(255, 21, 104, 172),
-        unselectedItemColor: Colors.black54,
-        showUnselectedLabels: true,
-        type: BottomNavigationBarType.fixed,
-        iconSize: 28,
-        onTap: _onItemTapped,
-        items: const [
-          BottomNavigationBarItem(icon: Icon(Icons.home), label: 'Home'),          
-          BottomNavigationBarItem(icon: Icon(Icons.category), label: 'Categories '),
-          BottomNavigationBarItem(icon: Icon(Icons.shopping_cart_outlined ), label: 'Cart'),         
-          BottomNavigationBarItem(icon: Icon(Icons.person_outline_sharp), label: 'Profile'),
+      bottomNavigationBar: NavigationBar(
+        selectedIndex: _selectedIndex,
+        onDestinationSelected: _onItemTapped,
+        destinations: const [
+          NavigationDestination(
+            icon: Icon(Icons.home_outlined),
+            selectedIcon: Icon(Icons.home),
+            label: 'Home',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.category_outlined),
+            selectedIcon: Icon(Icons.category),
+            label: 'Categories',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.shopping_cart_outlined),
+            selectedIcon: Icon(Icons.shopping_cart),
+            label: 'Cart',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.person_outline),
+            selectedIcon: Icon(Icons.person),
+            label: 'Profile',
+          ),
         ],
-       
       ),
     );
   }
