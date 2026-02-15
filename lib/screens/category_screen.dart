@@ -5,11 +5,14 @@ import 'package:zalonidentalhub/providers/category_providers.dart';
 import 'package:zalonidentalhub/widgets/category_widgets.dart';
 
 // ---------------------------------------------------------------------------
-// Breakpoints following Material 3 canonical layouts
+// Breakpoints — Material 3 canonical window size classes
 // ---------------------------------------------------------------------------
 const double _kCompactBreakpoint = 600;
 const double _kMediumBreakpoint = 1240;
 
+// ===========================================================================
+// CategoriesScreen
+// ===========================================================================
 class CategoriesScreen extends ConsumerStatefulWidget {
   const CategoriesScreen({super.key});
 
@@ -17,34 +20,86 @@ class CategoriesScreen extends ConsumerStatefulWidget {
   ConsumerState<CategoriesScreen> createState() => _CategoriesScreenState();
 }
 
-class _CategoriesScreenState extends ConsumerState<CategoriesScreen> {
-  final TextEditingController _searchController = TextEditingController();
+class _CategoriesScreenState extends ConsumerState<CategoriesScreen>
+    with RestorationMixin {
+  late final SearchController _searchController;
   final ScrollController _scrollController = ScrollController();
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
 
+  // Restoration properties — survive config changes & process death
+  final RestorableString _restorableSearchQuery = RestorableString('');
+  final RestorableString _restorableCategory = RestorableString('');
+
+  // -----------------------------------------------------------------------
+  // RestorationMixin
+  // -----------------------------------------------------------------------
+  @override
+  String? get restorationId => 'categories_screen';
+
+  @override
+  void restoreState(RestorationBucket? oldBucket, bool initialRestore) {
+    registerForRestoration(_restorableSearchQuery, 'search_query');
+    registerForRestoration(_restorableCategory, 'selected_category');
+
+    if (initialRestore) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        // Restore search query
+        final query = _restorableSearchQuery.value;
+        if (query.isNotEmpty) {
+          _searchController.text = query;
+          ref.read(categorySearchProvider.notifier).update(query);
+        }
+        // Restore selected category ('' means "all")
+        final category = _restorableCategory.value;
+        if (category.isNotEmpty) {
+          ref.read(selectedCategoryProvider.notifier).select(category);
+        }
+      });
+    }
+  }
+
+  // -----------------------------------------------------------------------
+  // Lifecycle
+  // -----------------------------------------------------------------------
   @override
   void initState() {
     super.initState();
+    _searchController = SearchController();
+    _searchController.addListener(_onSearchTextChanged);
     _scrollController.addListener(_onScroll);
   }
 
   @override
   void dispose() {
+    _restorableSearchQuery.dispose();
+    _restorableCategory.dispose();
     _scrollController.removeListener(_onScroll);
     _scrollController.dispose();
+    _searchController.removeListener(_onSearchTextChanged);
     _searchController.dispose();
     super.dispose();
   }
 
-  /// Infinite scroll — triggers load-more when near the bottom.
+  /// Sync SearchController text → restorable + debounced provider.
+  void _onSearchTextChanged() {
+    _restorableSearchQuery.value = _searchController.text;
+    ref.read(categorySearchProvider.notifier).update(_searchController.text);
+  }
+
+  /// Infinite scroll — trigger load-more near bottom.
   void _onScroll() {
     if (!_scrollController.hasClients) return;
-    final maxScroll = _scrollController.position.maxScrollExtent;
-    final currentScroll = _scrollController.position.pixels;
-    // Trigger load when within 200px of the bottom
-    if (maxScroll - currentScroll <= 200) {
+    final max = _scrollController.position.maxScrollExtent;
+    final cur = _scrollController.position.pixels;
+    if (max - cur <= 200) {
       ref.read(paginatedProductsProvider.notifier).loadMore();
     }
+  }
+
+  /// Select a category and persist for restoration.
+  void _selectCategory(String? category) {
+    _restorableCategory.value = category ?? '';
+    ref.read(selectedCategoryProvider.notifier).select(category);
   }
 
   int _crossAxisCount(double width) {
@@ -53,6 +108,9 @@ class _CategoriesScreenState extends ConsumerState<CategoriesScreen> {
     return 2;
   }
 
+  // -----------------------------------------------------------------------
+  // Build
+  // -----------------------------------------------------------------------
   @override
   Widget build(BuildContext context) {
     return LayoutBuilder(
@@ -64,7 +122,6 @@ class _CategoriesScreenState extends ConsumerState<CategoriesScreen> {
         return Scaffold(
           key: _scaffoldKey,
           appBar: _buildAppBar(context, isCompact),
-          // On compact, categories live in a drawer
           drawer: isCompact ? _buildCategoryDrawer(context) : null,
           body: isCompact
               ? _buildCompactBody(context)
@@ -75,7 +132,7 @@ class _CategoriesScreenState extends ConsumerState<CategoriesScreen> {
   }
 
   // -----------------------------------------------------------------------
-  // App Bar
+  // App Bar — only watches viewMode (narrow rebuild scope)
   // -----------------------------------------------------------------------
   PreferredSizeWidget _buildAppBar(BuildContext context, bool isCompact) {
     final viewMode = ref.watch(productViewModeProvider);
@@ -84,13 +141,12 @@ class _CategoriesScreenState extends ConsumerState<CategoriesScreen> {
       leading: isCompact
           ? IconButton(
               icon: const Icon(Icons.menu),
-              tooltip: 'Open categories',
+              tooltip: 'Open categories drawer',
               onPressed: () => _scaffoldKey.currentState?.openDrawer(),
             )
           : null,
       title: const Text('Categories'),
       actions: [
-        // Grid / List toggle — functional
         IconButton(
           icon: Icon(
             viewMode == ProductViewMode.grid
@@ -127,44 +183,41 @@ class _CategoriesScreenState extends ConsumerState<CategoriesScreen> {
               ),
             ),
             const Divider(height: 1),
-            // "All" option
-            _buildAllCategoriesOption(context),
+            _buildAllCategoriesOption(context, closeDrawer: true),
             const Divider(height: 1),
-            // Category list
-            Expanded(child: _buildCategoryListView(context)),
+            Expanded(child: _buildCategoryListView(context, closeDrawer: true)),
           ],
         ),
       ),
     );
   }
 
-  Widget _buildAllCategoriesOption(BuildContext context) {
+  Widget _buildAllCategoriesOption(BuildContext context,
+      {bool closeDrawer = false}) {
     final selected = ref.watch(selectedCategoryProvider);
-    final isAllSelected = selected == null;
+    final isAll = selected == null;
 
     return ListTile(
       leading: Icon(
         Icons.dashboard_outlined,
-        color: isAllSelected
-            ? Theme.of(context).colorScheme.primary
-            : null,
+        color: isAll ? Theme.of(context).colorScheme.primary : null,
       ),
       title: Text(
         'All Products',
         style: TextStyle(
-          fontWeight: isAllSelected ? FontWeight.bold : FontWeight.normal,
+          fontWeight: isAll ? FontWeight.bold : FontWeight.normal,
         ),
       ),
-      selected: isAllSelected,
+      selected: isAll,
       onTap: () {
-        ref.read(selectedCategoryProvider.notifier).select(null);
-        Navigator.of(context).pop(); // close drawer
+        _selectCategory(null);
+        if (closeDrawer) Navigator.of(context).pop();
       },
     );
   }
 
   // -----------------------------------------------------------------------
-  // Category sidebar panel — medium & expanded layouts (≥600dp)
+  // Category sidebar — medium & expanded layouts (≥600dp)
   // -----------------------------------------------------------------------
   Widget _buildCategorySidebar(BuildContext context, bool isExpanded) {
     final theme = Theme.of(context);
@@ -172,14 +225,11 @@ class _CategoriesScreenState extends ConsumerState<CategoriesScreen> {
       width: isExpanded ? 260 : 220,
       child: Column(
         children: [
-          // Sidebar header
           Container(
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
               border: Border(
-                bottom: BorderSide(
-                  color: theme.colorScheme.outlineVariant,
-                ),
+                bottom: BorderSide(color: theme.colorScheme.outlineVariant),
               ),
             ),
             child: Row(
@@ -193,11 +243,10 @@ class _CategoriesScreenState extends ConsumerState<CategoriesScreen> {
               ],
             ),
           ),
-          // "All" option
           _buildSidebarAllOption(context),
           const Divider(height: 1),
-          // Scrollable category list
-          Expanded(child: _buildCategoryListView(context)),
+          Expanded(
+              child: _buildCategoryListView(context, closeDrawer: false)),
         ],
       ),
     );
@@ -209,17 +258,18 @@ class _CategoriesScreenState extends ConsumerState<CategoriesScreen> {
       category: 'All Products',
       productCount: 0,
       isSelected: selected == null,
-      onTap: () => ref.read(selectedCategoryProvider.notifier).select(null),
+      onTap: () => _selectCategory(null),
     );
   }
 
   // -----------------------------------------------------------------------
-  // Shared category list — used by both drawer and sidebar
+  // Shared category list — used by drawer and sidebar
   // -----------------------------------------------------------------------
-  Widget _buildCategoryListView(BuildContext context) {
-    final filteredCategoriesAsync = ref.watch(filteredCategoryListProvider);
+  Widget _buildCategoryListView(BuildContext context,
+      {required bool closeDrawer}) {
+    final filteredAsync = ref.watch(filteredCategoryListProvider);
 
-    return filteredCategoriesAsync.when(
+    return filteredAsync.when(
       data: (categories) {
         if (categories.isEmpty) {
           return const Center(
@@ -240,11 +290,8 @@ class _CategoriesScreenState extends ConsumerState<CategoriesScreen> {
               productCount: cat.productCount,
               isSelected: cat.name == selected,
               onTap: () {
-                ref.read(selectedCategoryProvider.notifier).select(cat.name);
-                // Close drawer if in compact mode
-                if (Scaffold.of(context).isDrawerOpen) {
-                  Navigator.of(context).pop();
-                }
+                _selectCategory(cat.name);
+                if (closeDrawer) Navigator.of(context).pop();
               },
             );
           },
@@ -252,14 +299,14 @@ class _CategoriesScreenState extends ConsumerState<CategoriesScreen> {
       },
       loading: () => const ShimmerCategorySidebar(),
       error: (err, _) => ErrorRetryCard(
-        message: 'Failed to load categories',
+        message: 'Could not load dental service categories',
         onRetry: () => ref.invalidate(categoryListProvider),
       ),
     );
   }
 
   // -----------------------------------------------------------------------
-  // Compact body — full-width product content with search
+  // Compact body — full-width content with pull-to-refresh
   // -----------------------------------------------------------------------
   Widget _buildCompactBody(BuildContext context) {
     return RefreshIndicator(
@@ -270,7 +317,7 @@ class _CategoriesScreenState extends ConsumerState<CategoriesScreen> {
   }
 
   // -----------------------------------------------------------------------
-  // Wide body — sidebar + product content side by side
+  // Wide body — sidebar + content side by side
   // -----------------------------------------------------------------------
   Widget _buildWideBody(BuildContext context, bool isExpanded) {
     return Row(
@@ -290,31 +337,37 @@ class _CategoriesScreenState extends ConsumerState<CategoriesScreen> {
   }
 
   // -----------------------------------------------------------------------
-  // Product content — search bar + breadcrumb + sliver product grid/list
+  // Product content — SliverAppBar with SearchAnchor + product slivers
   // -----------------------------------------------------------------------
   Widget _buildProductContent(BuildContext context) {
-    final paginated = ref.watch(paginatedProductsProvider);
+    // Use ref.select for the loading/error state decision so the grid
+    // doesn't rebuild when only isLoadingMore changes.
+    final isLoading = ref.watch(
+        paginatedProductsProvider.select((s) => s.isLoading));
+    final error = ref.watch(
+        paginatedProductsProvider.select((s) => s.error));
+    final productsEmpty = ref.watch(
+        paginatedProductsProvider.select((s) => s.products.isEmpty));
     final filteredProducts = ref.watch(filteredCategoryProductsProvider);
     final viewMode = ref.watch(productViewModeProvider);
     final selectedCategory = ref.watch(selectedCategoryProvider);
+    final searchQuery = ref.watch(categorySearchProvider);
     final crossAxisCount =
         _crossAxisCount(MediaQuery.sizeOf(context).width);
 
     return CustomScrollView(
       controller: _scrollController,
+      restorationId: 'categories_product_scroll',
       slivers: [
-        // Pinned search bar
-        SliverPersistentHeader(
+        // Pinned search bar via SliverAppBar + SearchAnchor
+        SliverAppBar(
           pinned: true,
-          delegate: _SearchBarDelegate(
-            searchController: _searchController,
-            onChanged: (query) =>
-                ref.read(categorySearchProvider.notifier).update(query),
-            onClear: () {
-              _searchController.clear();
-              ref.read(categorySearchProvider.notifier).clear();
-            },
-          ),
+          floating: true,
+          snap: true,
+          automaticallyImplyLeading: false,
+          toolbarHeight: 68,
+          surfaceTintColor: Colors.transparent,
+          title: _buildSearchAnchor(context),
         ),
 
         // Breadcrumb
@@ -322,38 +375,49 @@ class _CategoriesScreenState extends ConsumerState<CategoriesScreen> {
           child: _buildBreadcrumb(context, selectedCategory),
         ),
 
-        // Loading state — first load
-        if (paginated.isLoading)
+        // Content states
+        if (isLoading)
           SliverFillRemaining(
             child: ShimmerProductGrid(crossAxisCount: crossAxisCount),
           )
-        // Error state — no data loaded yet
-        else if (paginated.error != null && paginated.products.isEmpty)
+        else if (error != null && productsEmpty)
           SliverFillRemaining(
             child: ErrorRetryCard(
-              message: paginated.error!,
+              message: 'Could not load dental products. '
+                  'Please check your connection and try again.',
               onRetry: () =>
                   ref.read(paginatedProductsProvider.notifier).refresh(),
             ),
           )
-        // Empty state
         else if (filteredProducts.isEmpty)
-          const SliverFillRemaining(
+          SliverFillRemaining(
             child: EmptyStateWidget(
-              message: 'No products found',
-              subtitle: 'Try adjusting your search or category filter',
+              message: selectedCategory != null
+                  ? 'No treatments found in $selectedCategory'
+                  : 'No dental products found',
+              subtitle: searchQuery.isNotEmpty
+                  ? 'No results for "$searchQuery" \u2014 try a different term'
+                  : 'Try selecting another category or adjusting your filters',
+              icon: Icons.medical_services_outlined,
             ),
           )
-        // Products loaded
         else ...[
-          // Pagination info header
+          // Pagination info — uses Consumer + ref.select to avoid
+          // rebuilding the grid when only totalLoaded changes.
           SliverToBoxAdapter(
-            child: PaginationInfoBar(
-              loaded: paginated.totalLoaded,
-              hasMore: paginated.hasMore,
+            child: Consumer(
+              builder: (context, ref, _) {
+                final totalLoaded = ref.watch(
+                    paginatedProductsProvider.select((s) => s.totalLoaded));
+                final hasMore = ref.watch(
+                    paginatedProductsProvider.select((s) => s.hasMore));
+                return PaginationInfoBar(
+                    loaded: totalLoaded, hasMore: hasMore);
+              },
             ),
           ),
-          // Products — grid or list
+
+          // Product grid or list
           if (viewMode == ProductViewMode.grid)
             SliverPadding(
               padding: const EdgeInsets.symmetric(horizontal: 12),
@@ -372,7 +436,7 @@ class _CategoriesScreenState extends ConsumerState<CategoriesScreen> {
                   crossAxisCount: crossAxisCount,
                   crossAxisSpacing: 8,
                   mainAxisSpacing: 8,
-                  childAspectRatio: 0.72,
+                  childAspectRatio: 0.68,
                 ),
               ),
             )
@@ -393,44 +457,200 @@ class _CategoriesScreenState extends ConsumerState<CategoriesScreen> {
               ),
             ),
 
-          // Load-more spinner at bottom
-          if (paginated.isLoadingMore)
-            const SliverToBoxAdapter(
-              child: Padding(
-                padding: EdgeInsets.all(16),
-                child: Center(
-                  child: SizedBox(
-                    width: 24,
-                    height: 24,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  ),
-                ),
-              ),
-            ),
+          // Load-more footer — isolated Consumer to avoid rebuilding
+          // the product grid when isLoadingMore toggles.
+          SliverToBoxAdapter(
+            child: Consumer(
+              builder: (context, ref, _) {
+                final isLoadingMore = ref.watch(
+                    paginatedProductsProvider.select((s) => s.isLoadingMore));
+                final hasMore = ref.watch(
+                    paginatedProductsProvider.select((s) => s.hasMore));
+                final isStillLoading = ref.watch(
+                    paginatedProductsProvider.select((s) => s.isLoading));
 
-          // Explicit "Load more" button
-          if (paginated.hasMore &&
-              !paginated.isLoadingMore &&
-              !paginated.isLoading)
-            SliverToBoxAdapter(
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: Center(
-                  child: OutlinedButton.icon(
-                    onPressed: () => ref
-                        .read(paginatedProductsProvider.notifier)
-                        .loadMore(),
-                    icon: const Icon(Icons.expand_more),
-                    label: const Text('Load more'),
-                  ),
-                ),
-              ),
+                if (isLoadingMore) {
+                  return const Padding(
+                    padding: EdgeInsets.all(16),
+                    child: Center(
+                      child: SizedBox(
+                        width: 24,
+                        height: 24,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      ),
+                    ),
+                  );
+                }
+                if (hasMore && !isStillLoading) {
+                  return Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Center(
+                      child: OutlinedButton.icon(
+                        onPressed: () => ref
+                            .read(paginatedProductsProvider.notifier)
+                            .loadMore(),
+                        icon: const Icon(Icons.expand_more),
+                        label: const Text('Load more products'),
+                      ),
+                    ),
+                  );
+                }
+                return const SizedBox.shrink();
+              },
             ),
+          ),
 
-          // Bottom safe-area padding
+          // Bottom safe-area
           const SliverPadding(padding: EdgeInsets.only(bottom: 80)),
         ],
       ],
+    );
+  }
+
+  // -----------------------------------------------------------------------
+  // SearchAnchor — with recent searches + category suggestions
+  // -----------------------------------------------------------------------
+  Widget _buildSearchAnchor(BuildContext context) {
+    return SearchAnchor(
+      searchController: _searchController,
+      isFullScreen: false,
+      viewHintText: 'Search dental treatments, products...',
+      viewOnSubmitted: (query) {
+        _searchController.closeView(query);
+        if (query.trim().isNotEmpty) {
+          ref.read(recentSearchesProvider.notifier).add(query.trim());
+        }
+      },
+      builder: (context, controller) {
+        return SearchBar(
+          controller: controller,
+          hintText: 'Search dental products...',
+          leading: const Padding(
+            padding: EdgeInsets.only(left: 8),
+            child: Icon(Icons.search),
+          ),
+          trailing: [
+            if (controller.text.isNotEmpty)
+              IconButton(
+                icon: const Icon(Icons.clear, size: 20),
+                tooltip: 'Clear search',
+                onPressed: () {
+                  controller.clear();
+                  _restorableSearchQuery.value = '';
+                  ref.read(categorySearchProvider.notifier).clear();
+                },
+              ),
+          ],
+          onTap: () => controller.openView(),
+          onChanged: (query) {
+            // Inline filtering via debounced provider
+            _restorableSearchQuery.value = query;
+            ref.read(categorySearchProvider.notifier).update(query);
+          },
+          elevation: WidgetStateProperty.all(1.0),
+          shape: WidgetStateProperty.all(
+            RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          ),
+        );
+      },
+      suggestionsBuilder: (context, controller) {
+        final query = controller.text.toLowerCase().trim();
+        final suggestions = <Widget>[];
+
+        if (query.isEmpty) {
+          // --- Recent searches ---
+          final recent = ref.read(recentSearchesProvider);
+          if (recent.isNotEmpty) {
+            suggestions.add(Padding(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+              child: Text('Recent searches',
+                  style: Theme.of(context).textTheme.labelMedium),
+            ));
+            for (final term in recent) {
+              suggestions.add(ListTile(
+                leading: const Icon(Icons.history, size: 20),
+                title: Text(term),
+                trailing: IconButton(
+                  icon: const Icon(Icons.close, size: 16),
+                  tooltip: 'Remove from recent',
+                  onPressed: () {
+                    ref.read(recentSearchesProvider.notifier).remove(term);
+                    // Rebuild suggestions
+                    controller.text = controller.text;
+                  },
+                ),
+                onTap: () {
+                  controller.closeView(term);
+                  _restorableSearchQuery.value = term;
+                  ref.read(categorySearchProvider.notifier).update(term);
+                },
+              ));
+            }
+          }
+
+          // --- Popular categories ---
+          final categories =
+              ref.read(categoryListProvider).value ?? [];
+          if (categories.isNotEmpty) {
+            suggestions.add(Padding(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+              child: Text('Browse categories',
+                  style: Theme.of(context).textTheme.labelMedium),
+            ));
+            for (final cat in categories.take(6)) {
+              suggestions.add(ListTile(
+                leading: const Icon(Icons.category_outlined, size: 20),
+                title: Text(cat.name),
+                trailing: Text(
+                  '${cat.productCount}',
+                  style: Theme.of(context).textTheme.labelSmall,
+                ),
+                onTap: () {
+                  controller.closeView('');
+                  _selectCategory(cat.name);
+                  ref.read(categorySearchProvider.notifier).clear();
+                },
+              ));
+            }
+          }
+        } else {
+          // --- Matching categories ---
+          final categories =
+              ref.read(categoryListProvider).value ?? [];
+          final matching = categories
+              .where((c) => c.name.toLowerCase().contains(query))
+              .toList();
+
+          for (final cat in matching) {
+            suggestions.add(ListTile(
+              leading: const Icon(Icons.category_outlined, size: 20),
+              title: Text(cat.name),
+              subtitle: Text('${cat.productCount} dental products'),
+              onTap: () {
+                controller.closeView(cat.name);
+                _selectCategory(cat.name);
+                ref.read(recentSearchesProvider.notifier).add(cat.name);
+                ref.read(categorySearchProvider.notifier).clear();
+              },
+            ));
+          }
+
+          // Hint if no category matches (products will still be filtered)
+          if (matching.isEmpty) {
+            suggestions.add(ListTile(
+              leading: const Icon(Icons.search, size: 20),
+              title: Text('Search for "$query"'),
+              subtitle: const Text('Filter products by name'),
+              onTap: () {
+                controller.closeView(query);
+                ref.read(recentSearchesProvider.notifier).add(query);
+              },
+            ));
+          }
+        }
+
+        return suggestions;
+      },
     );
   }
 
@@ -445,8 +665,7 @@ class _CategoriesScreenState extends ConsumerState<CategoriesScreen> {
         children: [
           InkWell(
             borderRadius: BorderRadius.circular(4),
-            onTap: () =>
-                ref.read(selectedCategoryProvider.notifier).select(null),
+            onTap: () => _selectCategory(null),
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
               child: Row(
@@ -480,60 +699,6 @@ class _CategoriesScreenState extends ConsumerState<CategoriesScreen> {
             ),
           ],
         ],
-      ),
-    );
-  }
-}
-
-// ---------------------------------------------------------------------------
-// SliverPersistentHeaderDelegate — pinned search bar
-// ---------------------------------------------------------------------------
-class _SearchBarDelegate extends SliverPersistentHeaderDelegate {
-  final TextEditingController searchController;
-  final ValueChanged<String> onChanged;
-  final VoidCallback onClear;
-
-  const _SearchBarDelegate({
-    required this.searchController,
-    required this.onChanged,
-    required this.onClear,
-  });
-
-  @override
-  double get maxExtent => 72;
-
-  @override
-  double get minExtent => 72;
-
-  @override
-  bool shouldRebuild(covariant _SearchBarDelegate oldDelegate) => false;
-
-  @override
-  Widget build(
-      BuildContext context, double shrinkOffset, bool overlapsContent) {
-    final theme = Theme.of(context);
-    return Container(
-      color: theme.colorScheme.surface,
-      padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
-      child: SearchBar(
-        controller: searchController,
-        hintText: 'Search products...',
-        leading: const Padding(
-          padding: EdgeInsets.only(left: 8),
-          child: Icon(Icons.search),
-        ),
-        trailing: [
-          if (searchController.text.isNotEmpty)
-            IconButton(
-              icon: const Icon(Icons.clear, size: 20),
-              onPressed: onClear,
-            ),
-        ],
-        onChanged: onChanged,
-        elevation: WidgetStateProperty.all(overlapsContent ? 2.0 : 0.0),
-        shape: WidgetStateProperty.all(
-          RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        ),
       ),
     );
   }

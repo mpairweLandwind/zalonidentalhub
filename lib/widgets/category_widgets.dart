@@ -34,127 +34,138 @@ class ProductGridTile extends ConsumerWidget {
     final discountPct = product.percentageReduction;
     final theme = Theme.of(context);
 
-    return Semantics(
-      label: '${product.name}, '
-          '${formatPrice(product.discountPrice)}'
-          '${hasDiscount ? ', was ${formatPrice(product.salePrice)}, ${discountPct.toStringAsFixed(0)}% off' : ''}',
-      button: true,
-      child: Card(
-        elevation: 2,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(12),
-        ),
-        clipBehavior: Clip.antiAlias,
-        child: InkWell(
-          borderRadius: BorderRadius.circular(12),
-          onTap: () {
-            Navigator.of(context).push(
-              MaterialPageRoute(
-                builder: (_) => ProductDetails(
-                  key: ValueKey(product.name),
-                  products: [product],
-                  categoryName: product.category,
-                  categoryImageUrl: product.imageUrl,
-                  subcategories: [],
+    return FocusTraversalGroup(
+      child: Semantics(
+        label: '${product.name}, '
+            '${formatPrice(product.discountPrice)}'
+            '${hasDiscount ? ', was ${formatPrice(product.salePrice)}, ${discountPct.toStringAsFixed(0)}% off' : ''}',
+        button: true,
+        child: Card(
+          elevation: 2,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
+          clipBehavior: Clip.antiAlias,
+          child: InkWell(
+            borderRadius: BorderRadius.circular(12),
+            onTap: () {
+              Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => ProductDetails(
+                    key: ValueKey(product.name),
+                    products: [product],
+                    categoryName: product.category,
+                    categoryImageUrl: product.imageUrl,
+                    subcategories: [],
+                  ),
                 ),
-              ),
-            );
-          },
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // Image section
-              Expanded(
-                flex: 3,
-                child: Stack(
-                  fit: StackFit.expand,
-                  children: [
-                    CachedNetworkImage(
-                      imageUrl: product.imageUrl,
-                      fit: BoxFit.cover,
-                      memCacheWidth: 300,
-                      memCacheHeight: 300,
-                      placeholder: (_, __) => Container(
-                        color: theme.colorScheme.surfaceContainerHighest,
-                        child: const Center(
-                          child: SizedBox(
-                            width: 24,
-                            height: 24,
-                            child: CircularProgressIndicator(strokeWidth: 2),
+              );
+            },
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Image section with Semantics for screen readers
+                Expanded(
+                  flex: 3,
+                  child: Semantics(
+                    image: true,
+                    label: '${product.name} image',
+                    child: Stack(
+                      fit: StackFit.expand,
+                      children: [
+                        CachedNetworkImage(
+                          imageUrl: product.imageUrl,
+                          fit: BoxFit.cover,
+                          memCacheWidth: 300,
+                          memCacheHeight: 300,
+                          placeholder: (_, __) => Container(
+                            color: theme.colorScheme.surfaceContainerHighest,
+                            child: const Center(
+                              child: SizedBox(
+                                width: 24,
+                                height: 24,
+                                child:
+                                    CircularProgressIndicator(strokeWidth: 2),
+                              ),
+                            ),
                           ),
-                        ),
-                      ),
-                      errorWidget: (_, __, ___) => Container(
-                        color: theme.colorScheme.surfaceContainerHighest,
-                        child: Icon(
-                          Icons.broken_image_outlined,
-                          size: 32,
-                          color: theme.colorScheme.onSurfaceVariant,
-                        ),
-                      ),
-                    ),
-                    if (hasDiscount)
-                      Positioned(
-                        top: 6,
-                        right: 6,
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 6, vertical: 3),
-                          decoration: BoxDecoration(
-                            color: AppTheme.discountBadgeColor(context),
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          child: Text(
-                            '-${discountPct.toStringAsFixed(0)}%',
-                            style: theme.textTheme.labelSmall?.copyWith(
-                              color: Colors.white,
-                              fontWeight: FontWeight.bold,
+                          errorWidget: (_, __, ___) => Container(
+                            color: theme.colorScheme.surfaceContainerHighest,
+                            child: Icon(
+                              Icons.broken_image_outlined,
+                              size: 32,
+                              color: theme.colorScheme.onSurfaceVariant,
                             ),
                           ),
                         ),
-                      ),
-                  ],
-                ),
-              ),
-              // Info section
-              Expanded(
-                flex: 2,
-                child: Padding(
-                  padding: const EdgeInsets.all(8),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Expanded(
-                        child: Text(
-                          product.name,
-                          style: theme.textTheme.bodySmall?.copyWith(
-                            fontWeight: FontWeight.w600,
+                        if (hasDiscount)
+                          Positioned(
+                            top: 6,
+                            right: 6,
+                            child: Semantics(
+                              label:
+                                  '${discountPct.toStringAsFixed(0)} percent off',
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 6, vertical: 3),
+                                decoration: BoxDecoration(
+                                  color: AppTheme.discountBadgeColor(context),
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                child: Text(
+                                  '-${discountPct.toStringAsFixed(0)}%',
+                                  style: theme.textTheme.labelSmall?.copyWith(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ),
+                            ),
                           ),
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        formatPrice(product.discountPrice),
-                        style: theme.textTheme.bodySmall?.copyWith(
-                          fontWeight: FontWeight.bold,
-                          color: AppTheme.priceColor(context),
-                        ),
-                      ),
-                      if (hasDiscount)
-                        Text(
-                          formatPrice(product.salePrice),
-                          style: theme.textTheme.labelSmall?.copyWith(
-                            color: theme.colorScheme.onSurfaceVariant,
-                            decoration: TextDecoration.lineThrough,
-                          ),
-                        ),
-                    ],
+                      ],
+                    ),
                   ),
                 ),
-              ),
-            ],
+                // Info section — min 14sp text via bodyMedium
+                Expanded(
+                  flex: 2,
+                  child: Padding(
+                    padding: const EdgeInsets.all(8),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Expanded(
+                          child: Text(
+                            product.name,
+                            style: theme.textTheme.bodyMedium?.copyWith(
+                              fontWeight: FontWeight.w600,
+                            ),
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          formatPrice(product.discountPrice),
+                          style: theme.textTheme.bodyMedium?.copyWith(
+                            fontWeight: FontWeight.bold,
+                            color: AppTheme.priceColor(context),
+                          ),
+                        ),
+                        if (hasDiscount)
+                          Text(
+                            formatPrice(product.salePrice),
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: theme.colorScheme.onSurfaceVariant,
+                              decoration: TextDecoration.lineThrough,
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
       ),
@@ -496,8 +507,8 @@ class PaginationInfoBar extends StatelessWidget {
         children: [
           Text(
             hasMore
-                ? 'Showing 1–$loaded (more available)'
-                : 'Showing all $loaded items',
+                ? 'Showing 1\u2013$loaded products (more available)'
+                : 'Showing all $loaded products',
             style: theme.textTheme.labelMedium?.copyWith(
               color: theme.colorScheme.onSurfaceVariant,
             ),

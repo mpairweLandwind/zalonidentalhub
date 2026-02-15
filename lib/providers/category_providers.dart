@@ -249,7 +249,7 @@ class CategorySearchNotifier extends Notifier<String> {
 
   void update(String query) {
     _debounce?.cancel();
-    _debounce = Timer(const Duration(milliseconds: 350), () {
+    _debounce = Timer(const Duration(milliseconds: 400), () {
       state = query.trim();
     });
   }
@@ -283,7 +283,36 @@ final filteredCategoryProductsProvider =
 });
 
 // ---------------------------------------------------------------------------
-// 7. Filtered categories list — applies search to category sidebar
+// 7. Recent searches — stores last N search terms for suggestions
+// ---------------------------------------------------------------------------
+const int _kMaxRecentSearches = 8;
+
+class RecentSearchesNotifier extends Notifier<List<String>> {
+  @override
+  List<String> build() => [];
+
+  void add(String query) {
+    final trimmed = query.trim();
+    if (trimmed.isEmpty) return;
+    // Remove duplicate, add to front, cap at max
+    final updated = [trimmed, ...state.where((s) => s != trimmed)];
+    state = updated.take(_kMaxRecentSearches).toList();
+  }
+
+  void remove(String query) {
+    state = state.where((s) => s != query).toList();
+  }
+
+  void clearAll() => state = [];
+}
+
+final recentSearchesProvider =
+    NotifierProvider<RecentSearchesNotifier, List<String>>(
+  RecentSearchesNotifier.new,
+);
+
+// ---------------------------------------------------------------------------
+// 8. Filtered categories list — applies search to category sidebar
 // ---------------------------------------------------------------------------
 final filteredCategoryListProvider =
     Provider<AsyncValue<List<CategoryInfo>>>((ref) {
