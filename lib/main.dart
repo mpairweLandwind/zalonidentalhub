@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:zalonidentalhub/login_page.dart';
 import 'package:zalonidentalhub/main_screen.dart';
 import 'package:zalonidentalhub/models/cart_model.dart';
+import 'package:zalonidentalhub/providers/authprovider.dart';
 import 'package:zalonidentalhub/providers/product_provider.dart';
 import 'package:zalonidentalhub/register_page.dart';
 import 'package:firebase_core/firebase_core.dart';
@@ -63,24 +64,43 @@ class _SplashScreenState extends ConsumerState<SplashScreen> {
 
   Future<void> _initializeApp() async {
     try {
+      // Hydrate auth session and load product data in parallel.
       await Future.wait<void>([
+        // Touch the auth provider so its authStateChanges listener starts,
+        // then wait until the first hydration completes.
+        _waitForAuthInit(),
         ref.read(productProvider.notifier).fetchProducts(null),
         ref.read(productProvider.notifier).fetchCategory(),
         ref.read(productProvider.notifier).fetchPromotion(),
         ref.read(productProvider.notifier).fetchSpecialCategories(),
-      ]); // Get the loaded products
+      ]);
     } catch (e) {
       debugPrint("Error loading data: $e");
     }
 
     if (mounted) {
-      await Future.delayed(const Duration(seconds: 3)); // Wait for 5 seconds
+      await Future.delayed(const Duration(seconds: 3));
       if (mounted) {
         Navigator.pushReplacement(
           context,
           MaterialPageRoute(builder: (context) => const MainScreen()),
         );
       }
+    }
+  }
+
+  /// Wait until [authProvider] has finished its initial hydration from
+  /// Firebase's persisted session.
+  Future<void> _waitForAuthInit() async {
+    // Reading the provider triggers the authStateChanges subscription.
+    final auth = ref.read(authProvider);
+    if (auth.isInitialized) return;
+
+    // Poll until the listener has resolved the persisted session.
+    // Typically resolves in <200ms.
+    while (mounted) {
+      await Future.delayed(const Duration(milliseconds: 100));
+      if (ref.read(authProvider).isInitialized) return;
     }
   }
 

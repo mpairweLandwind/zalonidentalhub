@@ -30,16 +30,15 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       return;
     }
 
-    try {
-      await authNotifier.login(email, password);
+    final success = await authNotifier.login(email, password);
 
-      // Navigate to CartScreen on successful login
-      if (mounted) {
-        Navigator.pushReplacementNamed(context, '/CartScreen');
-      }
-    } catch (e) {
-      if (mounted) {
-        _showErrorDialog(e.toString());
+    if (mounted) {
+      if (success) {
+        // Pop back so the user returns to the screen they came from.
+        Navigator.pop(context);
+      } else {
+        final error = ref.read(authProvider).errorMessage;
+        if (error != null) _showErrorDialog(error);
       }
     }
   }
