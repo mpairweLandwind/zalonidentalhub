@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:zalonidentalhub/login_page.dart';
 import 'package:zalonidentalhub/main_screen.dart';
-import 'package:zalonidentalhub/models/cart_model.dart';
 import 'package:zalonidentalhub/providers/authprovider.dart';
 import 'package:zalonidentalhub/providers/product_provider.dart';
 import 'package:zalonidentalhub/register_page.dart';
@@ -33,12 +32,7 @@ class MyApp extends StatelessWidget {
         '/loginScreen': (context) => const LoginScreen(),
         '/registerScreen': (context) => const RegisterScreen(),
         '/Dashboard': (context) => const MainScreen(),
-        '/CartScreen': (context) => CartScreen(
-          cartItems: const [],
-          cartTotal: 0,
-          cart: Cart(),
-          user: null,
-        ),
+        '/CartScreen': (context) => const CartScreen(),
         '/accountScreen': (context) => const AccountScreen(),
       },
       title: 'Zaloni Dental Hub',

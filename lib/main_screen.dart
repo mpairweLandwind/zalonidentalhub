@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:zalonidentalhub/models/cart_model.dart';
 import 'package:zalonidentalhub/screens/account_screen.dart';
 import 'package:zalonidentalhub/screens/cart_screen.dart';
 import 'package:zalonidentalhub/screens/category_screen.dart';
@@ -18,7 +17,7 @@ class _MainScreenState extends State<MainScreen> {
   final List<Widget> _widgetOptions = [
     const HomeScreen(),
     const CategoriesScreen(),
-    CartScreen(cartItems: const [], cartTotal: 0, cart: Cart(), user: null),
+    const CartScreen(),
     const AccountScreen(),
   ];
 

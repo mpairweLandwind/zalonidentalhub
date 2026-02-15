@@ -6,11 +6,11 @@ class Cart extends Notifier<List<CartItem>> {
   List<CartItem> build() => [];
 
   void addToCart(CartItem item) {
-    final existingItemIndex = state.indexWhere((i) => i.name == item.name);
-    if (existingItemIndex >= 0) {
+    final existingIndex = state.indexWhere((i) => i.name == item.name);
+    if (existingIndex >= 0) {
       final updated = [...state];
-      updated[existingItemIndex] = updated[existingItemIndex].copyWith(
-        quantity: updated[existingItemIndex].quantity + item.quantity,
+      updated[existingIndex] = updated[existingIndex].copyWith(
+        quantity: updated[existingIndex].quantity + item.quantity,
       );
       state = updated;
     } else {
@@ -20,6 +20,13 @@ class Cart extends Notifier<List<CartItem>> {
 
   void removeFromCart(CartItem item) {
     state = state.where((i) => i.name != item.name).toList();
+  }
+
+  /// Re-insert a previously removed item at its original index.
+  void insertAt(int index, CartItem item) {
+    final updated = [...state];
+    updated.insert(index.clamp(0, updated.length), item);
+    state = updated;
   }
 
   void incrementQuantity(CartItem item) {
@@ -46,7 +53,12 @@ class Cart extends Notifier<List<CartItem>> {
 
   double get cartTotal {
     return state.fold(
-        0, (total, item) => total + (item.discountPrice * item.quantity));
+        0, (total, item) => total + item.lineTotal);
+  }
+
+  double get totalSavings {
+    return state.fold(
+        0, (total, item) => total + item.lineSavings);
   }
 
   int get itemCount {

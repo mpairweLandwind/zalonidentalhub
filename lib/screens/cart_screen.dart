@@ -6,310 +6,628 @@ import 'package:zalonidentalhub/models/cart_model.dart';
 import 'package:zalonidentalhub/models/user_model.dart';
 import 'package:zalonidentalhub/providers/authprovider.dart';
 
-class CartScreen extends ConsumerStatefulWidget {
-  const CartScreen({super.key, required List cartItems, required int cartTotal, required Cart cart, required user});
+class CartScreen extends ConsumerWidget {
+  const CartScreen({super.key});
 
-  @override
-  ConsumerState<CartScreen> createState() => _CartScreenState();
-}
-
-class _CartScreenState extends ConsumerState<CartScreen> {
-  // Helper function to format numbers with commas
-String _formatPrice(double price) {
-    return 'UGX ${price.toStringAsFixed(2).replaceAllMapped(
+  static String formatPrice(double price) {
+    return 'UGX ${price.toStringAsFixed(0).replaceAllMapped(
           RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'),
           (Match m) => '${m[1]},',
         )}';
   }
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final cartItems = ref.watch(cartProvider);
-    final auth = ref.watch(authProvider);
-    final user = auth.userModel;
-    final isLoggedIn = ref.watch(authProvider).isAuthenticated;
-    final double subtotal = cartItems.fold(
-      0.0,
-      (total, item) => total + (item.discountPrice * item.quantity),
-    );
+    final isAuthenticated =
+        ref.watch(authProvider.select((s) => s.isAuthenticated));
+    final userModel = ref.watch(authProvider.select((s) => s.userModel));
 
     return Scaffold(
       appBar: AppBar(
         title: const Text('Cart'),
+        actions: [
+          if (cartItems.isNotEmpty)
+            IconButton(
+              tooltip: 'Clear cart',
+              icon: const Icon(Icons.delete_sweep_outlined),
+              onPressed: () => _confirmClearCart(context, ref),
+            ),
+        ],
       ),
-      body: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          if (isLoggedIn && user != null)
-            Padding(
-              padding: const EdgeInsets.all(16.0),
-              child: Text(
-                'Welcome ${user.firstName} ${user.lastName}',
-                style: const TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.blue,
+      body: cartItems.isEmpty
+          ? const _EmptyCartView()
+          : _CartContent(
+              cartItems: cartItems,
+              isAuthenticated: isAuthenticated,
+              userModel: userModel,
+            ),
+    );
+  }
+
+  Future<void> _confirmClearCart(BuildContext context, WidgetRef ref) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Clear Cart'),
+        content: const Text('Remove all items from your cart?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Clear All'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true) {
+      ref.read(cartProvider.notifier).clearCart();
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Cart cleared')),
+        );
+      }
+    }
+  }
+}
+
+// ─── Empty state ───────────────────────────────────────────────────────────
+
+class _EmptyCartView extends StatelessWidget {
+  const _EmptyCartView();
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    final textTheme = Theme.of(context).textTheme;
+
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.shopping_cart_outlined,
+                size: 80, color: colors.onSurfaceVariant.withValues(alpha: 0.4)),
+            const SizedBox(height: 16),
+            Text(
+              'Your cart is empty',
+              style: textTheme.titleLarge,
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Browse our products and add items to get started.',
+              textAlign: TextAlign.center,
+              style: textTheme.bodyMedium
+                  ?.copyWith(color: colors.onSurfaceVariant),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ─── Cart content (items + bottom bar) ─────────────────────────────────────
+
+class _CartContent extends ConsumerWidget {
+  final List<CartItem> cartItems;
+  final bool isAuthenticated;
+  final UserModel? userModel;
+
+  const _CartContent({
+    required this.cartItems,
+    required this.isAuthenticated,
+    required this.userModel,
+  });
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final cart = ref.read(cartProvider.notifier);
+    final subtotal = cart.cartTotal;
+    final savings = cart.totalSavings;
+    final itemCount = cart.itemCount;
+
+    return Column(
+      children: [
+        // Scrollable item list
+        Expanded(
+          child: ListView.builder(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            itemCount: cartItems.length,
+            itemBuilder: (context, index) {
+              final item = cartItems[index];
+              return _DismissibleCartItem(
+                item: item,
+                index: index,
+              );
+            },
+          ),
+        ),
+
+        // Bottom checkout bar
+        _CheckoutBar(
+          subtotal: subtotal,
+          savings: savings,
+          itemCount: itemCount,
+          isAuthenticated: isAuthenticated,
+          userModel: userModel,
+          cartItems: cartItems,
+        ),
+      ],
+    );
+  }
+}
+
+// ─── Dismissible cart item ─────────────────────────────────────────────────
+
+class _DismissibleCartItem extends ConsumerWidget {
+  final CartItem item;
+  final int index;
+
+  const _DismissibleCartItem({
+    required this.item,
+    required this.index,
+  });
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final colors = Theme.of(context).colorScheme;
+
+    return Semantics(
+      label: '${item.name}, quantity ${item.quantity}, '
+          '${CartScreen.formatPrice(item.lineTotal)}',
+      child: Dismissible(
+        key: ValueKey(item.name),
+        direction: DismissDirection.endToStart,
+        background: Container(
+          alignment: Alignment.centerRight,
+          padding: const EdgeInsets.only(right: 20),
+          margin: const EdgeInsets.symmetric(vertical: 4),
+          decoration: BoxDecoration(
+            color: colors.errorContainer,
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Icon(Icons.delete_outlined, color: colors.error),
+        ),
+        confirmDismiss: (_) async => true,
+        onDismissed: (_) {
+          ref.read(cartProvider.notifier).removeFromCart(item);
+          ScaffoldMessenger.of(context).clearSnackBars();
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('${item.name} removed'),
+              action: SnackBarAction(
+                label: 'Undo',
+                onPressed: () {
+                  ref.read(cartProvider.notifier).insertAt(index, item);
+                },
+              ),
+            ),
+          );
+        },
+        child: _CartItemCard(item: item),
+      ),
+    );
+  }
+}
+
+// ─── Single cart item card ─────────────────────────────────────────────────
+
+class _CartItemCard extends ConsumerWidget {
+  final CartItem item;
+
+  const _CartItemCard({required this.item});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final colors = Theme.of(context).colorScheme;
+    final textTheme = Theme.of(context).textTheme;
+
+    return Card(
+      margin: const EdgeInsets.symmetric(vertical: 4),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Product image
+            ClipRRect(
+              borderRadius: BorderRadius.circular(8),
+              child: Image.network(
+                item.imageUrl,
+                width: 80,
+                height: 80,
+                fit: BoxFit.cover,
+                errorBuilder: (_, __, ___) => Container(
+                  width: 80,
+                  height: 80,
+                  color: colors.surfaceContainerHighest,
+                  child: Icon(Icons.image_not_supported_outlined,
+                      color: colors.onSurfaceVariant),
                 ),
               ),
             ),
-          const Padding(
-            padding: EdgeInsets.symmetric(horizontal: 16.0),
-            child: Divider(),
-          ),
-          Expanded(
-            child: ListView(
-              children: [
-                Padding(
-                  padding: const EdgeInsets.all(16.0),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+            const SizedBox(width: 12),
+
+            // Details
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    item.name,
+                    style: textTheme.titleSmall
+                        ?.copyWith(fontWeight: FontWeight.w600),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  const SizedBox(height: 4),
+
+                  // Prices
+                  Row(
                     children: [
-                      const Text(
-                        'Cart Summary',
-                        style: TextStyle(
-                          fontSize: 18,
+                      Text(
+                        CartScreen.formatPrice(item.discountPrice),
+                        style: textTheme.bodyMedium?.copyWith(
                           fontWeight: FontWeight.bold,
                         ),
                       ),
-                      const SizedBox(height: 8),
-                      Text(
-                        'Subtotal: ${_formatPrice(subtotal)}',
-                        style: const TextStyle(
-                          fontSize: 16,
-                          color: Colors.grey,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                ListView.builder(
-                  shrinkWrap: true,
-                  physics: const NeverScrollableScrollPhysics(),
-                  itemCount: cartItems.length,
-                  itemBuilder: (context, index) {
-                    final CartItem item = cartItems[index];
-                    return Padding(
-                      padding: const EdgeInsets.all(8.0),
-                      child: Card(
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12.0),
-                        ),
-                        elevation: 5,
-                        shadowColor: Colors.grey.withAlpha((0.3 * 255).toInt()),
-                        child: Padding(
-                          padding: const EdgeInsets.all(12.0),
-                          child: Row(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              ClipRRect(
-                                borderRadius: BorderRadius.circular(8.0),
-                                child: Image.network(
-                                  item.imageUrl,
-                                  width: 80,
-                                  height: 80,
-                                  fit: BoxFit.cover,
-                                  errorBuilder: (context, error, stackTrace) =>
-                                      const Icon(Icons.error, size: 80),
-                                ),
-                              ),
-                              const SizedBox(width: 12),
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(
-                                      item.name,
-                                      style: const TextStyle(
-                                        fontWeight: FontWeight.bold,
-                                        fontSize: 14,
-                                      ),
-                                      maxLines: 2,
-                                      overflow: TextOverflow.ellipsis,
-                                    ),
-                                    const SizedBox(height: 4),
-                                    Row(
-                                      children: [
-                                        Text(
-                                          _formatPrice(item.discountPrice),
-                                          style: const TextStyle(
-                                            fontSize: 14,
-                                            fontWeight: FontWeight.bold,
-                                          ),
-                                        ),
-                                        const SizedBox(width: 8),
-                                        Text(
-                                          _formatPrice(item.salePrice),
-                                          style: const TextStyle(
-                                            fontSize: 12,
-                                            decoration: TextDecoration.lineThrough,
-                                            color: Colors.grey,
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                    const SizedBox(height: 4),
-                                    Text(
-                                      '-${item.percentageReduction.toStringAsFixed(0)}%',
-                                      style: const TextStyle(
-                                        fontSize: 12,
-                                        fontWeight: FontWeight.bold,
-                                        color: Colors.green,
-                                      ),
-                                    ),
-                                    const SizedBox(height: 8),
-                                    const Text(
-                                      'ZaloniDentalHub Express',
-                                      style: TextStyle(
-                                        fontSize: 12,
-                                        color: Colors.blue,
-                                      ),
-                                    ),
-                                    const SizedBox(height: 8),
-                                    Row(
-                                      children: [
-                                        TextButton.icon(
-                                          onPressed: () {
-                                            ref
-                                                .read(cartProvider.notifier)
-                                                .removeFromCart(item);
-                                          },
-                                          icon: const Icon(
-                                            Icons.delete,
-                                            color: Colors.red,
-                                            size: 16,
-                                          ),
-                                          label: const Text(
-                                            'Remove',
-                                            style: TextStyle(
-                                              color: Colors.red,
-                                              fontSize: 12,
-                                            ),
-                                          ),
-                                        ),
-                                        const Spacer(),
-                                        Row(
-                                          children: [
-                                            IconButton(
-                                              icon: const Icon(Icons.remove, size: 18),
-                                              onPressed: () {
-                                                if (item.quantity > 1) {
-                                                  ref
-                                                      .read(cartProvider.notifier)
-                                                      .decrementQuantity(item);
-                                                } else {
-                                                  ref
-                                                      .read(cartProvider.notifier)
-                                                      .removeFromCart(item);
-                                                }
-                                              },
-                                            ),
-                                            Text(
-                                              item.quantity.toString(),
-                                              style: const TextStyle(
-                                                fontSize: 14,
-                                                fontWeight: FontWeight.bold,
-                                              ),
-                                            ),
-                                            IconButton(
-                                              icon: const Icon(Icons.add, size: 18),
-                                              onPressed: () => ref
-                                                  .read(cartProvider.notifier)
-                                                  .incrementQuantity(item),
-                                            ),
-                                          ],
-                                        ),
-                                      ],
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ],
+                      if (item.hasDiscount) ...[
+                        const SizedBox(width: 6),
+                        Text(
+                          CartScreen.formatPrice(item.salePrice),
+                          style: textTheme.bodySmall?.copyWith(
+                            decoration: TextDecoration.lineThrough,
+                            color: colors.onSurfaceVariant,
                           ),
                         ),
-                      ),
-                    );
-                  },
-                ),
-              ],
-            ),
-          ),
-          Container(
-            padding: const EdgeInsets.all(16.0),
-            decoration: const BoxDecoration(
-              border: Border(
-                top: BorderSide(color: Colors.grey, width: 0.5),
-              ),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    const Text(
-                      'Total:',
-                      style: TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
+                      ],
+                    ],
+                  ),
+
+                  if (item.hasDiscount) ...[
+                    const SizedBox(height: 2),
                     Text(
-                      _formatPrice(subtotal),
-                      style: const TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold,
+                      '-${item.percentageReduction.toStringAsFixed(0)}%',
+                      style: textTheme.labelSmall?.copyWith(
+                        color: colors.tertiary,
+                        fontWeight: FontWeight.w600,
                       ),
                     ),
                   ],
-                ),
-                const SizedBox(height: 16),
-                ElevatedButton(
-                  onPressed: () {
-                    if (isLoggedIn) {
-                      _checkout(cartItems, user!);
-                    } else {
-                      Navigator.pushNamed(context, '/accountScreen');
-                    }
-                  },
-                  style: ElevatedButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(vertical: 16),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12.0),
-                    ),
+
+                  const SizedBox(height: 8),
+
+                  // Quantity controls + remove
+                  Row(
+                    children: [
+                      // Remove button
+                      Semantics(
+                        button: true,
+                        label: 'Remove ${item.name}',
+                        child: InkWell(
+                          borderRadius: BorderRadius.circular(4),
+                          onTap: () {
+                            ref
+                                .read(cartProvider.notifier)
+                                .removeFromCart(item);
+                          },
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 4, vertical: 2),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(Icons.delete_outlined,
+                                    size: 16, color: colors.error),
+                                const SizedBox(width: 4),
+                                Text(
+                                  'Remove',
+                                  style: textTheme.labelSmall
+                                      ?.copyWith(color: colors.error),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                      const Spacer(),
+
+                      // Quantity stepper
+                      _QuantityStepper(item: item),
+                    ],
                   ),
-                  child: const Text('Order Now'),
-                ),
-              ],
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ─── Quantity stepper ──────────────────────────────────────────────────────
+
+class _QuantityStepper extends ConsumerWidget {
+  final CartItem item;
+
+  const _QuantityStepper({required this.item});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final colors = Theme.of(context).colorScheme;
+    final textTheme = Theme.of(context).textTheme;
+
+    return Container(
+      decoration: BoxDecoration(
+        border: Border.all(color: colors.outlineVariant),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Semantics(
+            button: true,
+            label: 'Decrease quantity',
+            child: SizedBox(
+              width: 36,
+              height: 36,
+              child: IconButton(
+                iconSize: 16,
+                padding: EdgeInsets.zero,
+                icon: const Icon(Icons.remove),
+                onPressed: () {
+                  if (item.quantity > 1) {
+                    ref.read(cartProvider.notifier).decrementQuantity(item);
+                  } else {
+                    ref.read(cartProvider.notifier).removeFromCart(item);
+                  }
+                },
+              ),
+            ),
+          ),
+          SizedBox(
+            width: 32,
+            child: Text(
+              '${item.quantity}',
+              textAlign: TextAlign.center,
+              style: textTheme.bodyMedium
+                  ?.copyWith(fontWeight: FontWeight.w600),
+            ),
+          ),
+          Semantics(
+            button: true,
+            label: 'Increase quantity',
+            child: SizedBox(
+              width: 36,
+              height: 36,
+              child: IconButton(
+                iconSize: 16,
+                padding: EdgeInsets.zero,
+                icon: const Icon(Icons.add),
+                onPressed: () {
+                  ref.read(cartProvider.notifier).incrementQuantity(item);
+                },
+              ),
             ),
           ),
         ],
       ),
     );
   }
+}
 
-  Future<void> _checkout(List<CartItem> cartItems, UserModel user) async {
-    if (cartItems.isEmpty) return;
+// ─── Checkout bottom bar ───────────────────────────────────────────────────
 
-    final String message = _constructWhatsAppMessage(cartItems, user);
-    final String encodedMessage = Uri.encodeComponent(message);
-    const String businessPhoneNumber = '256772619555';
-    final Uri whatsappUrl = Uri.parse('https://wa.me/$businessPhoneNumber?text=$encodedMessage');
+class _CheckoutBar extends StatelessWidget {
+  final double subtotal;
+  final double savings;
+  final int itemCount;
+  final bool isAuthenticated;
+  final UserModel? userModel;
+  final List<CartItem> cartItems;
+
+  const _CheckoutBar({
+    required this.subtotal,
+    required this.savings,
+    required this.itemCount,
+    required this.isAuthenticated,
+    required this.userModel,
+    required this.cartItems,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    final textTheme = Theme.of(context).textTheme;
+
+    return Container(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+      decoration: BoxDecoration(
+        color: colors.surface,
+        border: Border(
+          top: BorderSide(color: colors.outlineVariant, width: 0.5),
+        ),
+      ),
+      child: SafeArea(
+        top: false,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            // Summary row
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(
+                  'Total ($itemCount ${itemCount == 1 ? 'item' : 'items'})',
+                  style: textTheme.titleSmall,
+                ),
+                Text(
+                  CartScreen.formatPrice(subtotal),
+                  style: textTheme.titleMedium
+                      ?.copyWith(fontWeight: FontWeight.bold),
+                ),
+              ],
+            ),
+
+            // Savings badge
+            if (savings > 0) ...[
+              const SizedBox(height: 4),
+              Align(
+                alignment: Alignment.centerRight,
+                child: Text(
+                  'You save ${CartScreen.formatPrice(savings)}',
+                  style: textTheme.labelSmall?.copyWith(
+                    color: colors.tertiary,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            ],
+
+            const SizedBox(height: 12),
+
+            // Checkout button
+            FilledButton.icon(
+              onPressed: () {
+                if (isAuthenticated && userModel != null) {
+                  _showOrderConfirmation(context);
+                } else {
+                  Navigator.pushNamed(context, '/loginScreen');
+                }
+              },
+              icon: Icon(isAuthenticated
+                  ? Icons.shopping_bag_outlined
+                  : Icons.login),
+              label: Text(isAuthenticated ? 'Order Now' : 'Log In to Order'),
+              style: FilledButton.styleFrom(
+                minimumSize: const Size(double.infinity, 48),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ─── Order confirmation before WhatsApp ──────────────────────
+
+  void _showOrderConfirmation(BuildContext context) {
+    final user = userModel!;
+
+    showModalBottomSheet(
+      context: context,
+      useSafeArea: true,
+      isScrollControlled: true,
+      builder: (ctx) => Padding(
+        padding: const EdgeInsets.fromLTRB(24, 24, 24, 32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(
+              'Confirm Your Order',
+              style: Theme.of(ctx)
+                  .textTheme
+                  .titleLarge
+                  ?.copyWith(fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 16),
+
+            // Order summary
+            ...cartItems.map((item) => Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 4),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Expanded(
+                        child: Text(
+                          '${item.name} x${item.quantity}',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Text(
+                        CartScreen.formatPrice(item.lineTotal),
+                        style: const TextStyle(fontWeight: FontWeight.w600),
+                      ),
+                    ],
+                  ),
+                )),
+
+            const Divider(height: 24),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Text('Total',
+                    style: TextStyle(fontWeight: FontWeight.bold)),
+                Text(
+                  CartScreen.formatPrice(subtotal),
+                  style: const TextStyle(fontWeight: FontWeight.bold),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Order will be sent via WhatsApp to Zaloni Dental Hub.',
+              style: Theme.of(ctx).textTheme.bodySmall?.copyWith(
+                    color: Theme.of(ctx).colorScheme.onSurfaceVariant,
+                  ),
+            ),
+            const SizedBox(height: 20),
+
+            FilledButton.icon(
+              onPressed: () {
+                Navigator.pop(ctx);
+                _checkout(context, cartItems, user);
+              },
+              icon: const Icon(Icons.send),
+              label: const Text('Send Order via WhatsApp'),
+              style: FilledButton.styleFrom(
+                minimumSize: const Size(double.infinity, 48),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _checkout(
+      BuildContext context, List<CartItem> items, UserModel user) async {
+    if (items.isEmpty) return;
+
+    final message = _constructWhatsAppMessage(items, user);
+    final encoded = Uri.encodeComponent(message);
+    const phone = '256772619555';
+    final url = Uri.parse('https://wa.me/$phone?text=$encoded');
 
     try {
-      if (await canLaunchUrl(whatsappUrl)) {
-        await launchUrl(whatsappUrl);
+      if (await canLaunchUrl(url)) {
+        await launchUrl(url, mode: LaunchMode.externalApplication);
       } else {
-        if (mounted) {
+        if (context.mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: const Text('WhatsApp is not installed. Please install WhatsApp to proceed.'),
+              content: const Text(
+                  'WhatsApp is not installed. Please install WhatsApp to proceed.'),
               action: SnackBarAction(
-                label: 'Install WhatsApp',
+                label: 'Install',
                 onPressed: () {
-                  final Uri playStoreUrl = Uri.parse(
-                    'https://play.google.com/store/apps/details?id=com.whatsapp',
+                  launchUrl(
+                    Uri.parse(
+                      'https://play.google.com/store/apps/details?id=com.whatsapp',
+                    ),
+                    mode: LaunchMode.externalApplication,
                   );
-                  launchUrl(playStoreUrl);
                 },
               ),
             ),
@@ -317,26 +635,33 @@ String _formatPrice(double price) {
         }
       }
     } catch (e) {
-      if (mounted) {
+      if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e')),
+          SnackBar(content: Text('Could not open WhatsApp: $e')),
         );
       }
     }
   }
 
-  String _constructWhatsAppMessage(List<CartItem> cartItems, UserModel user) {
-    String message = "Hello ZaloniDentalHub, I would like to place an order.\n\n";
-    message += "Name: ${user.firstName} ${user.lastName}\n";
-    message += "Phone: ${user.phoneNumber}\n\n";
-    message += "Cart Details:\n";
+  String _constructWhatsAppMessage(
+      List<CartItem> items, UserModel user) {
+    final buffer = StringBuffer()
+      ..writeln('Hello ZaloniDentalHub, I would like to place an order.')
+      ..writeln()
+      ..writeln('Name: ${user.fullName}')
+      ..writeln('Phone: ${user.phoneNumber}')
+      ..writeln()
+      ..writeln('Cart Details:');
 
-    for (var item in cartItems) {
-      message += "${item.name} - ${_formatPrice(item.discountPrice)} x ${item.quantity}\n";
+    for (final item in items) {
+      buffer.writeln(
+          '${item.name} - ${CartScreen.formatPrice(item.discountPrice)} x ${item.quantity}');
     }
 
-    message += "\nTotal: ${_formatPrice(cartItems.fold(0.0, (total, item) => total + (item.discountPrice * item.quantity)))}";
+    buffer.writeln();
+    buffer.write(
+        'Total: ${CartScreen.formatPrice(items.fold(0.0, (t, i) => t + i.lineTotal))}');
 
-    return message;
+    return buffer.toString();
   }
 }
